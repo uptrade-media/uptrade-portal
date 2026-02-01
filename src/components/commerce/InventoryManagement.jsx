@@ -1,9 +1,11 @@
 // src/components/commerce/InventoryManagement.jsx
 // Manage product inventory levels
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect } from 'react'
 import useAuthStore from '@/lib/auth-store'
-import { useCommerceStore, getOfferings, updateOffering } from '@/lib/commerce-store'
+import { useCommerceOfferings, useUpdateCommerceOffering, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,

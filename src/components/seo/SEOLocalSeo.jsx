@@ -72,14 +72,18 @@ export default function SEOLocalSeo({ projectId }) {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="bg-muted/30 border border-border/50 p-1 h-auto flex-wrap">
+        <TabsList className="bg-[var(--surface-secondary)] border border-[var(--border-primary)] p-1 h-auto flex-wrap">
           {LOCAL_SEO_TABS.map(tab => {
             const Icon = tab.icon
             return (
               <TabsTrigger
                 key={tab.id}
                 value={tab.id}
-                className="flex items-center gap-2 px-4 py-2.5 data-[state=active]:bg-primary data-[state=active]:text-white"
+                className="flex items-center gap-2 px-4 py-2.5 data-[state=active]:text-white"
+                style={{
+                  '--tw-bg-opacity': activeTab === tab.id ? '1' : undefined,
+                  backgroundColor: activeTab === tab.id ? 'var(--brand-primary)' : undefined
+                }}
               >
                 <Icon className="h-4 w-4" />
                 <span className="hidden sm:inline">{tab.label}</span>

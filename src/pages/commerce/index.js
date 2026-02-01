@@ -1,7 +1,6 @@
 // src/pages/commerce/index.js
 // Commerce module exports
 
-export { default as CommerceModule } from './CommerceModule'
 export { default as CommerceDashboard } from './CommerceDashboard'
 export { default as OfferingsList } from './OfferingsList'
 export { default as OfferingCreate } from './OfferingCreate'

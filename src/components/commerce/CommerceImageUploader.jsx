@@ -4,13 +4,11 @@
  * Drag-and-drop image uploader for commerce offerings.
  * Supports featured image and gallery images.
  * Images are stored in Files module under Commerce/{type}s/{slug}/
+ * MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
  */
 import { useState, useRef, useCallback } from 'react'
-import { 
-  uploadOfferingImage, 
-  deleteOfferingImage, 
-  setFeaturedImage 
-} from '@/lib/commerce-store'
+import { useUploadCommerceImage, useDeleteCommerceImage, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {

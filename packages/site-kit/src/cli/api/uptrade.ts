@@ -29,6 +29,12 @@ export interface AuthResult {
   accessToken: string
   userId: string
   email: string
+  // When using API key, we get project info directly
+  projectId?: string
+  projectName?: string
+  orgId?: string
+  orgName?: string
+  isApiKey?: boolean
 }
 
 // ============================================
@@ -137,21 +143,33 @@ export async function authenticateWithUptrade(): Promise<AuthResult> {
 // ============================================
 
 export async function authenticateWithApiKey(apiKey: string): Promise<AuthResult> {
-  const response = await fetch(`${API_URL}/auth/verify-api-key`, {
-    headers: { 'Authorization': `Bearer ${apiKey}` }
+  // Use the verify-api-key endpoint to validate and get project details
+  const response = await fetch(`${API_URL}/api/public/seo/verify-api-key`, {
+    headers: { 'X-API-Key': apiKey }
   })
 
-  if (!response.ok) {
+  if (response.ok) {
+    const data = await response.json()
+    if (data.valid) {
+      return {
+        accessToken: apiKey,
+        userId: 'api-key-user',
+        email: data.project?.name ? `Project: ${data.project.name}` : `API Key verified`,
+        projectId: data.project?.id,
+        projectName: data.project?.name,
+        orgId: data.organization?.id,
+        orgName: data.organization?.name,
+        isApiKey: true,
+      }
+    }
+  }
+
+  // Check if it's a 401 (invalid key) vs other error
+  if (response.status === 401) {
     throw new Error('Invalid API key')
   }
-
-  const { user_id, email } = await response.json()
-
-  return {
-    accessToken: apiKey,
-    userId: user_id,
-    email: email
-  }
+  
+  throw new Error(`API verification failed: ${response.status}`)
 }
 
 // ============================================

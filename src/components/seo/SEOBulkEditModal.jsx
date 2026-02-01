@@ -89,6 +89,9 @@ export default function SEOBulkEditModal({
   const [applyProgress, setApplyProgress] = useState(0)
   const [results, setResults] = useState({ success: 0, failed: 0 })
 
+  // Ensure pages is always an array (handles raw API shape)
+  const pageList = Array.isArray(pages) ? pages : (pages?.pages ?? [])
+
   // Reset state when modal opens
   useEffect(() => {
     if (open) {
@@ -141,7 +144,7 @@ export default function SEOBulkEditModal({
     setIsGenerating(true)
     setGenerationProgress(0)
     const suggestions = {}
-    const selectedPages = pages.filter(p => selectedPageIds.has(p.id))
+    const selectedPages = pageList.filter(p => selectedPageIds.has(p.id))
     
     for (let i = 0; i < selectedPages.length; i++) {
       const page = selectedPages[i]
@@ -341,10 +344,10 @@ export default function SEOBulkEditModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wand2 className="h-5 w-5 text-[var(--accent-primary)]" />
-            Bulk AI Edit
+            Bulk Signal Edit
           </DialogTitle>
           <DialogDescription>
-            Generate and apply AI-optimized {fieldConfig?.label || 'content'} for multiple pages at once
+            Generate and apply Signal-optimized {fieldConfig?.label || 'content'} for multiple pages at once
           </DialogDescription>
         </DialogHeader>
 

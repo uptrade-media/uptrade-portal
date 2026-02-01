@@ -48,13 +48,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { EmptyState } from '@/components/EmptyState'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 
-import {
-  DELIVERABLE_STATUS_CONFIG,
-  DELIVERABLE_TYPE_CONFIG,
-} from '@/lib/projects-v2-store'
+import { DELIVERABLE_STATUS_CONFIG, DELIVERABLE_TYPE_CONFIG } from '@/lib/hooks'
 
 // Type icons
 const TYPE_ICONS = {
@@ -262,22 +260,18 @@ export function DeliverablesPanel({
               ))}
             </div>
           ) : (
-            <div className="text-center py-12">
-              <Package className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-              <h3 className="text-lg font-medium mb-1">No deliverables found</h3>
-              <p className="text-muted-foreground mb-4">
-                {activeTab === 'all' 
+            <EmptyState
+              icon={Package}
+              title="No deliverables found"
+              description={
+                activeTab === 'all'
                   ? 'No deliverables have been created yet'
-                  : `No deliverables in this category`
-                }
-              </p>
-              {isAdmin && (
-                <Button onClick={() => onDeliverableSelect?.(null)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Deliverable
-                </Button>
-              )}
-            </div>
+                  : 'No deliverables in this category'
+              }
+              actionLabel={isAdmin ? 'Create Deliverable' : undefined}
+              onAction={isAdmin ? () => onDeliverableSelect?.(null) : undefined}
+              compact
+            />
           )}
         </div>
       </ScrollArea>

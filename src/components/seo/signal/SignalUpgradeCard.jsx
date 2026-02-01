@@ -1,16 +1,17 @@
 // src/components/seo/signal/SignalUpgradeCard.jsx
 // Shown to users without Signal access - prompts upgrade
 import { motion } from 'framer-motion'
-import { Sparkles, Brain, Zap, FileText, ArrowRight, Mail } from 'lucide-react'
+import { Sparkles, Zap, FileText, ArrowRight, Mail } from 'lucide-react'
+import SignalIcon from '@/components/ui/SignalIcon'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 const FEATURE_MESSAGES = {
   insights: {
-    title: 'AI-Powered Insights',
+    title: 'Signal-Powered Insights',
     description: 'Get personalized recommendations tailored to your site',
-    icon: Brain
+    icon: SignalIcon
   },
   autofix: {
     title: 'Auto-Fix Issues',
@@ -23,8 +24,8 @@ const FEATURE_MESSAGES = {
     icon: FileText
   },
   suggest: {
-    title: 'AI Suggestions',
-    description: 'Get AI title and meta description suggestions',
+    title: 'Signal Suggestions',
+    description: 'Get Signal title and meta description suggestions',
     icon: Sparkles
   },
   default: {
@@ -117,7 +118,7 @@ export default function SignalUpgradeCard({
 
           <div className="grid gap-3 text-left max-w-sm mx-auto mb-6">
             <div className="flex items-start gap-3">
-              <Brain className="h-5 w-5 text-emerald-400 mt-0.5" />
+              <SignalIcon className="h-5 w-5 text-emerald-400 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-[var(--text-primary)]">Signal remembers</p>
                 <p className="text-xs text-[var(--text-tertiary)]">Your site history and what works</p>

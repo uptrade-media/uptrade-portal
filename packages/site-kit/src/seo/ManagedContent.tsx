@@ -1,6 +1,6 @@
 import * as React from 'react'
-import { getContentBlock } from './api'
-import type { ManagedContentProps, ManagedContentBlock } from './types'
+import { getContentBlock, getEntities, getPrimaryEntity } from './api'
+import type { ManagedContentProps, ManagedContentBlock, SEOEntity } from './types'
 
 /**
  * Parse and render markdown content (basic support)
@@ -21,6 +21,62 @@ function renderMarkdown(content: string): string {
     // Paragraphs
     .replace(/\n\n/gim, '</p><p>')
     .replace(/^(.+)$/gim, '<p>$1</p>')
+}
+
+/**
+ * Inject entity annotations into HTML content
+ * Wraps entity mentions with data-sonor-entity attributes for knowledge graph linking
+ */
+function injectEntityAnnotations(html: string, entities: SEOEntity[]): string {
+  if (!entities.length) return html
+  
+  let annotatedHtml = html
+  
+  // Sort entities by name length (longest first) to avoid partial matches
+  const sortedEntities = [...entities].sort((a, b) => b.name.length - a.name.length)
+  
+  for (const entity of sortedEntities) {
+    // Skip very short names to avoid false positives
+    if (entity.name.length < 3) continue
+    
+    // Create case-insensitive regex for entity name
+    // Avoid matching inside HTML tags or existing annotations
+    const regex = new RegExp(
+      `(?<![\\w-])(?<!data-sonor-entity=")${escapeRegExp(entity.name)}(?![\\w-])`,
+      'gi'
+    )
+    
+    // Determine schema type for microdata
+    const schemaType = getSchemaTypeForEntity(entity.entity_type)
+    
+    annotatedHtml = annotatedHtml.replace(regex, (match) => {
+      return `<span class="aeo-entity aeo-entity-${entity.entity_type}" ` +
+        `data-sonor-entity="${entity.id}" ` +
+        `data-sonor-entity-type="${entity.entity_type}" ` +
+        `data-sonor-entity-name="${entity.name}" ` +
+        `itemscope itemtype="https://schema.org/${schemaType}">` +
+        `<span itemprop="name">${match}</span></span>`
+    })
+  }
+  
+  return annotatedHtml
+}
+
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getSchemaTypeForEntity(entityType: string): string {
+  const typeMap: Record<string, string> = {
+    organization: 'Organization',
+    person: 'Person',
+    service: 'Service',
+    product: 'Product',
+    location: 'Place',
+    concept: 'Thing',
+    credential: 'EducationalOccupationalCredential',
+  }
+  return typeMap[entityType] || 'Thing'
 }
 
 /**
@@ -67,6 +123,7 @@ export async function ManagedContent({
   fallback,
   className,
   components = {},
+  injectEntityAnnotations: shouldInjectEntities = false,
 }: ManagedContentProps): Promise<React.ReactElement | null> {
   const block = await getContentBlock(projectId, path, section)
 
@@ -77,7 +134,25 @@ export async function ManagedContent({
     return null
   }
 
+  // Fetch entities if annotation is enabled
+  let entities: SEOEntity[] = []
+  if (shouldInjectEntities) {
+    try {
+      entities = await getEntities(projectId) as SEOEntity[]
+    } catch (err) {
+      console.warn('@uptrade/seo: Failed to fetch entities for annotation:', err)
+    }
+  }
+
   const containerClass = className || `uptrade-content uptrade-content--${section}`
+
+  // Helper to process HTML with optional entity injection
+  const processHtml = (html: string): string => {
+    if (shouldInjectEntities && entities.length > 0) {
+      return injectEntityAnnotations(html, entities)
+    }
+    return html
+  }
 
   // Handle different content types
   switch (block.content_type) {
@@ -85,12 +160,12 @@ export async function ManagedContent({
       return (
         <div 
           className={containerClass}
-          dangerouslySetInnerHTML={{ __html: block.content as string }}
+          dangerouslySetInnerHTML={{ __html: processHtml(block.content as string) }}
         />
       )
 
     case 'markdown':
-      const htmlContent = renderMarkdown(block.content as string)
+      const htmlContent = processHtml(renderMarkdown(block.content as string))
       return (
         <div 
           className={containerClass}

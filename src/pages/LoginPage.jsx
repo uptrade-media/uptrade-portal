@@ -49,6 +49,23 @@ export default function LoginPage() {
   const { login: authLogin, signup: authSignup, checkAuth, isAuthenticated, user } = useAuthStore()
   const nextPath = params.get('next') || '/dashboard'
   const brandKey = (params.get('brand') || 'default').toLowerCase()
+  
+  // Handle error from OAuth callback
+  const urlError = params.get('error')
+  const getUrlErrorMessage = () => {
+    switch (urlError) {
+      case 'no_contact':
+        return 'Account not found in system. If you believe this is an error, please contact support.'
+      case 'session_failed':
+        return 'Failed to establish session. Please try again.'
+      case 'fetch_failed':
+        return 'Failed to load account data. Please try again.'
+      case 'timeout':
+        return 'Authentication timed out. Please try again.'
+      default:
+        return null
+    }
+  }
   const brand = useMemo(() => BRAND_UI[brandKey] || BRAND_UI.default, [brandKey])
 
   // Redirect if already authenticated
@@ -332,9 +349,9 @@ export default function LoginPage() {
             </div>
 
             {/* Error */}
-            {error && (
+            {(error || getUrlErrorMessage()) && (
               <div role="alert" aria-live="polite" className="text-sm rounded-[var(--radius-md)] border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/10 text-[var(--accent-red)] px-3 py-2">
-                {error}
+                {error || getUrlErrorMessage()}
               </div>
             )}
 

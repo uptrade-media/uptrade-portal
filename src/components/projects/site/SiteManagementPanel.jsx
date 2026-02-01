@@ -9,7 +9,7 @@ import {
   FileEdit, Link2, Code, Braces, Loader2, Globe2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { SITE_VIEWS } from '@/lib/site-management-store'
+import { SITE_VIEWS } from '@/lib/hooks'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 

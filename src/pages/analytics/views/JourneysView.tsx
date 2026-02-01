@@ -371,8 +371,11 @@ function JourneyPathViz({
     return (
       <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground">
         <Route className="h-16 w-16 mb-4 opacity-20" />
-        <p className="text-lg font-medium">No journey data yet</p>
-        <p className="text-sm">Visitor paths will appear here once users navigate your site</p>
+        <p className="text-lg font-medium">No navigation flow detected</p>
+        <p className="text-sm text-center max-w-md mt-2">
+          Journey paths appear when visitors navigate between multiple pages. 
+          {flows && flows.length === 0 && " For single-page sites, all sessions start and end on the same page."}
+        </p>
       </div>
     )
   }
@@ -781,7 +784,7 @@ export default function JourneysView() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="h-full flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20">
+      <div className="h-full flex items-center justify-center bg-transparent">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -802,7 +805,7 @@ export default function JourneysView() {
 
   return (
     <TooltipProvider>
-      <div className="h-full flex flex-col overflow-hidden bg-gradient-to-br from-background via-background to-muted/10">
+      <div className="h-full flex flex-col overflow-hidden bg-transparent">
         
         {/* Hero Header */}
         <motion.div

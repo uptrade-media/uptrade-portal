@@ -2,7 +2,8 @@
 // Shows Signal's learning history - wins and losses
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Brain, TrendingUp, TrendingDown, ChevronRight, History } from 'lucide-react'
+import { TrendingUp, TrendingDown, ChevronRight, History } from 'lucide-react'
+import SignalIcon from '@/components/ui/SignalIcon'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -84,7 +85,7 @@ export default function WhatSignalLearnedCard({
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/20">
-            <Brain className="h-4 w-4 text-purple-400" />
+            <SignalIcon className="h-4 w-4 text-purple-400" />
           </div>
           <div>
             <CardTitle className="text-base">What Signal Learned</CardTitle>
@@ -145,7 +146,7 @@ function LoadingState() {
         transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
         className="mb-2"
       >
-        <Brain className="h-6 w-6 text-purple-400" />
+        <SignalIcon className="h-6 w-6 text-purple-400" />
       </motion.div>
       <p className="text-sm text-[var(--text-secondary)]">Loading patterns...</p>
     </div>

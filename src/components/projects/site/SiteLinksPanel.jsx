@@ -8,7 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useSiteManagementStore } from '@/lib/site-management-store'
+import { 
+  useCreateSiteLink, 
+  useUpdateSiteLink, 
+  useDeleteSiteLink,
+  useApproveSiteLink 
+} from '@/lib/hooks'
 import {
   Dialog,
   DialogContent,
@@ -52,7 +57,12 @@ export default function SiteLinksPanel({ project, links = [] }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingLink, setEditingLink] = useState(null)
   const [isDeleting, setIsDeleting] = useState(null)
-  const store = useSiteManagementStore()
+  
+  // React Query mutations
+  const createLinkMutation = useCreateSiteLink()
+  const updateLinkMutation = useUpdateSiteLink()
+  const deleteLinkMutation = useDeleteSiteLink()
+  const approveLinkMutation = useApproveSiteLink()
   
   const pendingLinks = links.filter(l => !l.approved_at && l.created_by === 'ai')
   const approvedLinks = links.filter(l => l.approved_at || l.created_by !== 'ai')
@@ -66,7 +76,7 @@ export default function SiteLinksPanel({ project, links = [] }) {
   const handleDelete = async (linkId) => {
     setIsDeleting(linkId)
     try {
-      await store.deleteLink(linkId)
+      await deleteLinkMutation.mutateAsync({ id: linkId, projectId: project.id })
       toast.success('Link deleted')
     } catch (error) {
       toast.error('Failed to delete link')
@@ -77,7 +87,7 @@ export default function SiteLinksPanel({ project, links = [] }) {
   
   const handleApprove = async (linkId) => {
     try {
-      await store.approveLink(linkId)
+      await approveLinkMutation.mutateAsync({ id: linkId, projectId: project.id })
       toast.success('Link approved')
     } catch (error) {
       toast.error('Failed to approve link')
@@ -111,7 +121,7 @@ export default function SiteLinksPanel({ project, links = [] }) {
           open={isCreateOpen}
           onOpenChange={setIsCreateOpen}
           onSubmit={async (data) => {
-            await store.createLink(data)
+            await createLinkMutation.mutateAsync({ projectId: project.id, data })
             toast.success('Link created')
             setIsCreateOpen(false)
           }}
@@ -269,7 +279,7 @@ export default function SiteLinksPanel({ project, links = [] }) {
         open={isCreateOpen}
         onOpenChange={setIsCreateOpen}
         onSubmit={async (data) => {
-          await store.createLink(data)
+          await createLinkMutation.mutateAsync({ projectId: project.id, data })
           toast.success('Link created')
           setIsCreateOpen(false)
         }}
@@ -281,7 +291,11 @@ export default function SiteLinksPanel({ project, links = [] }) {
         open={!!editingLink}
         onOpenChange={(open) => !open && setEditingLink(null)}
         onSubmit={async (data) => {
-          await store.updateLink(editingLink.id, data)
+          await updateLinkMutation.mutateAsync({ 
+            id: editingLink.id, 
+            projectId: project.id, 
+            data 
+          })
           toast.success('Link updated')
           setEditingLink(null)
         }}

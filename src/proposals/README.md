@@ -372,4 +372,4 @@ Numbered process visualization.
 - Frontmatter is parsed with `gray-matter`
 - MDX is compiled with `@mdx-js/mdx` using `evaluate()`
 - Components are provided by `ProposalBlocks.jsx`
-- Layout wrapper is `ProposalLayout.jsx`
+- Layout is provided by `ProposalTemplate.jsx` / `ProposalView.jsx` (no separate layout wrapper)

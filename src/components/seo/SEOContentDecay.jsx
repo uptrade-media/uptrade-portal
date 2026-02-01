@@ -1,7 +1,9 @@
 // src/components/seo/SEOContentDecay.jsx
 // Content Decay Detection - identify and refresh declining content
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { useSeoContentDecay, useDetectContentDecay, seoContentKeys } from '@/hooks/seo'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -23,36 +25,30 @@ import {
 import { cn } from '@/lib/utils'
 
 export default function SEOContentDecay({ projectId }) {
-  const { 
-    decayingContent, 
-    decaySummary,
-    decayLoading, 
-    fetchContentDecay,
-    detectContentDecay 
-  } = useSeoStore()
+  const queryClient = useQueryClient()
   
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  // React Query hooks
+  const { data: decayData, isLoading: decayLoading } = useSeoContentDecay(projectId)
+  const detectDecayMutation = useDetectContentDecay()
+  
+  // Extract data
+  const decayingContent = decayData?.content || decayData || []
+  const decaySummary = decayData?.summary || {}
+  
   const [analysisComplete, setAnalysisComplete] = useState(false)
 
-  useEffect(() => {
-    if (projectId) {
-      fetchContentDecay(projectId)
-    }
-  }, [projectId])
-
   const handleDetectDecay = async () => {
-    setIsAnalyzing(true)
     setAnalysisComplete(false)
     try {
-      await detectContentDecay(projectId)
+      await detectDecayMutation.mutateAsync(projectId)
       setAnalysisComplete(true)
-      // Auto-refresh after detection
-      await fetchContentDecay(projectId)
     } catch (error) {
       console.error('Decay detection error:', error)
     }
-    setIsAnalyzing(false)
   }
+  
+  // Use mutation loading state
+  const isAnalyzing = detectDecayMutation.isLoading
 
   const getSeverityColor = (severity) => {
     switch (severity) {
@@ -117,7 +113,7 @@ export default function SEOContentDecay({ projectId }) {
           ) : (
             <>
               <Sparkles className="mr-2 h-4 w-4" />
-              Run AI Analysis
+              Run Signal Analysis
             </>
           )}
         </Button>
@@ -132,7 +128,7 @@ export default function SEOContentDecay({ projectId }) {
                 <Sparkles className="h-6 w-6 text-primary animate-pulse" />
               </div>
               <div className="flex-1">
-                <h3 className="font-medium text-foreground">AI Analysis in Progress</h3>
+                <h3 className="font-medium text-foreground">Signal Analysis in Progress</h3>
                 <p className="text-sm text-muted-foreground">
                   Analyzing page performance trends from Google Search Console...
                 </p>

@@ -37,6 +37,8 @@ export default function SEOHealthScore({
   onViewDetails,
   onFixIssues 
 }) {
+  const pageList = Array.isArray(pages) ? pages : (pages?.pages ?? [])
+
   // Calculate component scores
   const scores = useMemo(() => {
     // Technical Score (0-100)
@@ -44,10 +46,10 @@ export default function SEOHealthScore({
     let technicalIssues = []
     
     // Check for technical issues in pages
-    const pagesWithIssues = pages.filter(p => p.health_score && p.health_score < 60)
-    const noindexPages = pages.filter(p => p.has_noindex)
-    const brokenPages = pages.filter(p => p.http_status >= 400)
-    const missingCanonicals = pages.filter(p => !p.canonical_url)
+    const pagesWithIssues = pageList.filter(p => p.health_score && p.health_score < 60)
+    const noindexPages = pageList.filter(p => p.has_noindex)
+    const brokenPages = pageList.filter(p => p.http_status >= 400)
+    const missingCanonicals = pageList.filter(p => !p.canonical_url)
     
     if (brokenPages.length > 0) {
       technicalScore -= Math.min(30, brokenPages.length * 5)
@@ -66,10 +68,10 @@ export default function SEOHealthScore({
     let contentScore = 100
     let contentIssues = []
     
-    const missingTitles = pages.filter(p => !p.title || p.title.length === 0)
-    const missingDescriptions = pages.filter(p => !p.meta_description)
-    const thinContent = pages.filter(p => p.word_count && p.word_count < 300)
-    const duplicateTitles = findDuplicates(pages.map(p => p.title).filter(Boolean))
+    const missingTitles = pageList.filter(p => !p.title || p.title.length === 0)
+    const missingDescriptions = pageList.filter(p => !p.meta_description)
+    const thinContent = pageList.filter(p => p.word_count && p.word_count < 300)
+    const duplicateTitles = findDuplicates(pageList.map(p => p.title).filter(Boolean))
     
     if (missingTitles.length > 0) {
       contentScore -= Math.min(25, missingTitles.length * 5)
@@ -116,8 +118,8 @@ export default function SEOHealthScore({
     let authorityScore = 60 // Default
     let authorityIssues = []
     
-    const internalLinksAvg = pages.length > 0 
-      ? pages.reduce((sum, p) => sum + (p.internal_links_in || 0), 0) / pages.length 
+    const internalLinksAvg = pageList.length > 0
+      ? pageList.reduce((sum, p) => sum + (p.internal_links_in || 0), 0) / pageList.length
       : 0
     
     if (internalLinksAvg < 3) {

@@ -1,87 +1,17 @@
 /**
  * PipelineKanban - Glass-styled kanban board for sales pipeline
- * Features: Drag-scroll, glass columns, smooth animations, collapsed closed stages
+ * Uses pipelineStages from CRM module (same config as sidebar; "Configure pipeline" customizes colors).
  */
 import { useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { 
-  Sparkles, 
-  PhoneCall, 
-  CheckCircle2, 
-  Send, 
-  MessageSquare, 
-  CheckCheck, 
-  XCircle,
-  ChevronDown,
-  ChevronUp,
-  Loader2
-} from 'lucide-react'
+import { ChevronDown, ChevronUp, CheckCheck, XCircle } from 'lucide-react'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import ProspectCard from './ProspectCard'
 import { GlassEmptyState } from './ui'
+import { DEFAULT_PIPELINE_STAGES } from './pipelineStages'
 
-// Pipeline stages configuration
-export const PIPELINE_STAGES = {
-  new_lead: { 
-    label: 'New Lead', 
-    color: '#3B82F6',
-    bgLight: 'rgba(59, 130, 246, 0.1)',
-    textColor: '#3B82F6',
-    borderColor: 'rgba(59, 130, 246, 0.2)',
-    icon: Sparkles 
-  },
-  contacted: { 
-    label: 'Contacted', 
-    color: '#39bfb0',
-    bgLight: 'rgba(57, 191, 176, 0.1)',
-    textColor: '#39bfb0',
-    borderColor: 'rgba(57, 191, 176, 0.2)',
-    icon: PhoneCall 
-  },
-  qualified: { 
-    label: 'Qualified', 
-    color: '#F59E0B',
-    bgLight: 'rgba(245, 158, 11, 0.1)',
-    textColor: '#F59E0B',
-    borderColor: 'rgba(245, 158, 11, 0.2)',
-    icon: CheckCircle2 
-  },
-  proposal_sent: { 
-    label: 'Proposal Sent', 
-    color: '#8B5CF6',
-    bgLight: 'rgba(139, 92, 246, 0.1)',
-    textColor: '#8B5CF6',
-    borderColor: 'rgba(139, 92, 246, 0.2)',
-    icon: Send 
-  },
-  negotiating: { 
-    label: 'Negotiating', 
-    color: '#F97316',
-    bgLight: 'rgba(249, 115, 22, 0.1)',
-    textColor: '#F97316',
-    borderColor: 'rgba(249, 115, 22, 0.2)',
-    icon: MessageSquare 
-  },
-  closed_won: { 
-    label: 'Won', 
-    color: '#22C55E',
-    bgLight: 'rgba(34, 197, 94, 0.1)',
-    textColor: '#22C55E',
-    borderColor: 'rgba(34, 197, 94, 0.2)',
-    icon: CheckCheck 
-  },
-  closed_lost: { 
-    label: 'Lost', 
-    color: '#EF4444',
-    bgLight: 'rgba(239, 68, 68, 0.1)',
-    textColor: '#EF4444',
-    borderColor: 'rgba(239, 68, 68, 0.2)',
-    icon: XCircle 
-  }
-}
-
-const ACTIVE_STAGES = ['new_lead', 'contacted', 'qualified', 'proposal_sent', 'negotiating']
 const CLOSED_STAGES = ['closed_won', 'closed_lost']
 
 // Pipeline Column Component
@@ -215,10 +145,12 @@ function ClosedDealsSummary({
   onToggle,
   selectedProspects,
   onSelectProspect,
-  onProspectClick
+  onProspectClick,
+  pipelineStages
 }) {
-  const wonConfig = PIPELINE_STAGES.closed_won
-  const lostConfig = PIPELINE_STAGES.closed_lost
+  const stages = pipelineStages || DEFAULT_PIPELINE_STAGES
+  const wonConfig = stages.closed_won
+  const lostConfig = stages.closed_lost
 
   return (
     <div className="flex flex-col min-w-0">
@@ -301,6 +233,7 @@ function ClosedDealsSummary({
 }
 
 export default function PipelineKanban({
+  pipelineStages: pipelineStagesProp,
   prospects,
   selectedProspects = [],
   isLoading = false,
@@ -315,27 +248,33 @@ export default function PipelineKanban({
   onArchive,
   className
 }) {
+  const pipelineStages = pipelineStagesProp || DEFAULT_PIPELINE_STAGES
   const scrollRef = useRef(null)
   const [isScrollDragging, setIsScrollDragging] = useState(false)
   const [startX, setStartX] = useState(0)
   const [scrollLeft, setScrollLeft] = useState(0)
   const [draggingProspectId, setDraggingProspectId] = useState(null)
 
+  // Active stage keys (exclude closed) from current config
+  const activeStageKeys = useMemo(() => {
+    return Object.keys(pipelineStages).filter(k => !CLOSED_STAGES.includes(k))
+  }, [pipelineStages])
+
   // Group prospects by stage
   const prospectsByStage = useMemo(() => {
     const grouped = {}
-    Object.keys(PIPELINE_STAGES).forEach(stage => {
+    Object.keys(pipelineStages).forEach(stage => {
       grouped[stage] = prospects.filter(p => (p.pipeline_stage || 'new_lead') === stage)
     })
     return grouped
-  }, [prospects])
+  }, [prospects, pipelineStages])
 
   // Handle move to next stage
   const handleMoveNext = (prospect) => {
     const currentStage = prospect.pipeline_stage || 'new_lead'
-    const currentIndex = ACTIVE_STAGES.indexOf(currentStage)
-    if (currentIndex < ACTIVE_STAGES.length - 1) {
-      onMoveToStage?.(prospect.id, ACTIVE_STAGES[currentIndex + 1])
+    const currentIndex = activeStageKeys.indexOf(currentStage)
+    if (currentIndex >= 0 && currentIndex < activeStageKeys.length - 1) {
+      onMoveToStage?.(prospect.id, activeStageKeys[currentIndex + 1])
     }
   }
 
@@ -346,11 +285,17 @@ export default function PipelineKanban({
 
   const handleDrop = (prospectId, newStage) => {
     setDraggingProspectId(null)
-    // Find the prospect to check if stage is actually changing
-    const prospect = prospects.find(p => p.id === prospectId)
-    if (prospect && prospect.pipeline_stage !== newStage) {
-      onMoveToStage?.(prospectId, newStage)
-    }
+    // If the dragged prospect is in the selection and multiple are selected, move all selected; otherwise move just the one
+    const idsToMove =
+      selectedProspects.length > 1 && selectedProspects.includes(prospectId)
+        ? selectedProspects
+        : [prospectId]
+    idsToMove.forEach((id) => {
+      const p = prospects.find((x) => x.id === id)
+      if (p && (p.pipeline_stage || 'new_lead') !== newStage) {
+        onMoveToStage?.(id, newStage)
+      }
+    })
   }
 
   // Clear dragging state when drag ends (e.g., cancelled)
@@ -383,10 +328,7 @@ export default function PipelineKanban({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-[var(--brand-primary)]" />
-          <p className="text-sm text-[var(--text-tertiary)]">Loading pipeline...</p>
-        </div>
+        <UptradeSpinner size="lg" label="Loading pipeline..." />
       </div>
     )
   }
@@ -397,7 +339,7 @@ export default function PipelineKanban({
       <div 
         ref={scrollRef}
         className={cn(
-          'flex-1 overflow-x-auto overflow-y-hidden pb-4 -mx-4 px-4',
+          'flex-1 overflow-x-auto overflow-y-hidden pb-4 -mx-4 px-4 select-none',
           'scroll-smooth snap-x snap-mandatory touch-pan-x',
           isScrollDragging ? 'cursor-grabbing' : 'cursor-grab'
         )}
@@ -408,17 +350,17 @@ export default function PipelineKanban({
         onMouseLeave={handleMouseUp}
       >
         <div 
-          className="grid gap-4 h-full"
+          className="grid gap-4 h-full select-none"
           style={{ 
-            gridTemplateColumns: `repeat(${ACTIVE_STAGES.length}, minmax(280px, 1fr))`,
-            minWidth: `${ACTIVE_STAGES.length * 300}px`
+            gridTemplateColumns: `repeat(${activeStageKeys.length}, minmax(280px, 1fr))`,
+            minWidth: `${activeStageKeys.length * 300}px`
           }}
         >
-          {ACTIVE_STAGES.map((stage, index) => (
+          {activeStageKeys.map((stage, index) => (
             <PipelineColumn
               key={stage}
               stage={stage}
-              config={PIPELINE_STAGES[stage]}
+              config={pipelineStages[stage]}
               prospects={prospectsByStage[stage] || []}
               selectedProspects={selectedProspects}
               onSelectProspect={onSelectProspect}
@@ -431,7 +373,7 @@ export default function PipelineKanban({
               onDrop={handleDrop}
               onDragStart={handleDragStart}
               draggingProspectId={draggingProspectId}
-              isLast={index === ACTIVE_STAGES.length - 1}
+              isLast={index === activeStageKeys.length - 1}
             />
           ))}
         </div>
@@ -447,6 +389,7 @@ export default function PipelineKanban({
         selectedProspects={selectedProspects}
         onSelectProspect={onSelectProspect}
         onProspectClick={onProspectClick}
+        pipelineStages={pipelineStages}
       />
       </div>
     </div>

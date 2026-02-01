@@ -1,5 +1,6 @@
 // src/components/seo/SEOQuickWins.jsx
 // Top 3 one-click fixes with estimated impact
+// MIGRATED TO REACT QUERY - Jan 29, 2026
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useSignalAccess } from '@/lib/signal-access'
@@ -21,7 +22,9 @@ import {
   Play
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useSeoStore } from '@/lib/seo-store'
+import { useSeoAiRecommendations, useSeoOpportunities, seoContentKeys } from '@/hooks/seo'
+import { seoApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
 
 /**
  * SEOQuickWins - Actionable one-click fixes
@@ -29,21 +32,24 @@ import { useSeoStore } from '@/lib/seo-store'
  */
 export default function SEOQuickWins({ site, projectId, onViewAll }) {
   const { hasAccess: hasSignalAccess } = useSignalAccess()
+  const queryClient = useQueryClient()
 
   // Show upgrade prompt if no Signal access
   if (!hasSignalAccess) {
     return <SignalUpgradeCard feature="autofix" variant="compact" />
   }
 
-  const { 
-    aiRecommendations,
-    applyRecommendation,
-    applyRecommendations,
-    opportunities
-  } = useSeoStore()
-
   // Use projectId directly (new architecture) or fallback to site.id (legacy)
   const siteId = projectId || site?.id
+
+  // React Query hooks
+  const { data: recommendationsData } = useSeoAiRecommendations(siteId)
+  const { data: opportunitiesData } = useSeoOpportunities(siteId)
+  
+  // Extract data (ensure arrays; API may return { opportunities: [] } or raw array)
+  const aiRecommendations = recommendationsData?.recommendations || recommendationsData || []
+  const opportunitiesRaw = opportunitiesData?.opportunities ?? opportunitiesData
+  const opportunities = Array.isArray(opportunitiesRaw) ? opportunitiesRaw : []
 
   const [applying, setApplying] = useState({})
   const [applyingAll, setApplyingAll] = useState(false)
@@ -83,7 +89,8 @@ export default function SEOQuickWins({ site, projectId, onViewAll }) {
     setApplying(prev => ({ ...prev, [item.id]: true }))
     try {
       if (item.type === 'recommendation') {
-        await applyRecommendation(item.id)
+        await seoApi.applyRecommendation(item.id)
+        queryClient.invalidateQueries({ queryKey: seoContentKeys.aiRecommendations(siteId) })
       }
       // For opportunities, we'd call a different function
     } catch (error) {
@@ -98,7 +105,8 @@ export default function SEOQuickWins({ site, projectId, onViewAll }) {
     try {
       const recIds = quickWins.filter(w => w.type === 'recommendation').map(w => w.id)
       if (recIds.length > 0) {
-        await applyRecommendations(siteId, recIds)
+        await Promise.all(recIds.map(id => seoApi.applyRecommendation(id)))
+        queryClient.invalidateQueries({ queryKey: seoContentKeys.aiRecommendations(siteId) })
       }
     } catch (error) {
       console.error('Failed to apply all:', error)

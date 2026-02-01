@@ -73,6 +73,7 @@ import { cn } from '@/lib/utils';
 import { format, addHours, setHours, setMinutes, startOfHour, differenceInMinutes } from 'date-fns';
 import { useBroadcastStore } from '@/stores/broadcastStore';
 import useAuthStore from '@/lib/auth-store';
+import { useBroadcastInsights, transformInsightsForComponent } from '@/hooks/useBroadcastInsights';
 import { PlatformIcon, PlatformSelector } from './PlatformIcon';
 import { AiImageGenerator } from './AiImageGenerator';
 import portalApi from '@/lib/portal-api';
@@ -233,14 +234,6 @@ const ASPECT_RATIOS = [
   { id: '1:1', label: 'Square', icon: Square, description: 'Feed posts' },
   { id: '4:5', label: 'Portrait Feed', icon: Crop, description: 'Instagram Feed' },
   { id: '16:9', label: 'Landscape', icon: Monitor, description: 'YouTube, LinkedIn' },
-];
-
-// Mock trending sounds
-const TRENDING_SOUNDS = [
-  { id: 1, name: 'Original Sound - Trending', artist: 'Various', uses: '2.3M', duration: '15s' },
-  { id: 2, name: 'Calm Background Beat', artist: 'ChillHop', uses: '890K', duration: '30s' },
-  { id: 3, name: 'Upbeat Corporate', artist: 'MusicBed', uses: '456K', duration: '60s' },
-  { id: 4, name: 'Viral Dance Track', artist: 'Unknown', uses: '5.1M', duration: '15s' },
 ];
 
 // =============================================================================
@@ -428,7 +421,6 @@ function ReelsEditor({
   aspectRatio,
   onAspectRatioChange,
 }) {
-  const [showSounds, setShowSounds] = useState(false);
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
@@ -545,68 +537,24 @@ function ReelsEditor({
         )}
       </div>
       
-      {/* Sound Selector */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
+      {/* Sound - Original Audio from Video */}
+      {videoFile && (
+        <div className="space-y-2">
           <Label className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
             <Music className="h-3.5 w-3.5" />
             Sound
           </Label>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="h-7 text-xs"
-            onClick={() => setShowSounds(!showSounds)}
-          >
-            {showSounds ? 'Hide' : 'Browse'}
-          </Button>
-        </div>
-        
-        {selectedSound ? (
           <div className="flex items-center gap-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand-primary)] to-[var(--brand-secondary)]">
-              <Music className="h-5 w-5 text-white" />
+              <Volume2 className="h-5 w-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-[var(--text-primary)] truncate">{selectedSound.name}</p>
-              <p className="text-xs text-[var(--text-tertiary)]">{selectedSound.artist} • {selectedSound.duration}</p>
+              <p className="text-sm font-medium text-[var(--text-primary)]">Original Audio</p>
+              <p className="text-xs text-[var(--text-tertiary)]">Audio from uploaded video</p>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => onSelectSound(null)} className="h-8 w-8">
-              <X className="h-4 w-4" />
-            </Button>
           </div>
-        ) : (
-          <Button
-            variant="outline"
-            onClick={() => setShowSounds(true)}
-            className="w-full justify-start gap-2 border-dashed"
-          >
-            <Plus className="h-4 w-4" />
-            Add original or trending sound
-          </Button>
-        )}
-        
-        {showSounds && (
-          <div className="space-y-2 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-3">
-            <p className="text-xs font-medium text-[var(--text-secondary)]">Trending Sounds</p>
-            {TRENDING_SOUNDS.map((sound) => (
-              <button
-                key={sound.id}
-                onClick={() => { onSelectSound(sound); setShowSounds(false); }}
-                className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-[var(--glass-bg-hover)]"
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--surface-secondary)]">
-                  <Play className="h-4 w-4 text-[var(--text-tertiary)]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[var(--text-primary)] truncate">{sound.name}</p>
-                  <p className="text-xs text-[var(--text-tertiary)]">{sound.uses} uses • {sound.duration}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -939,11 +887,14 @@ function PlatformToolsPanel({
   onGenerateContent,
   isGenerating,
   onShowAiImageGenerator,
+  // Real insights data from API
+  platformHooks = [],
+  platformFormats = [],
+  platformTopics = [],
+  platformTimes = [],
+  insightsLoading = false,
+  insightsSource = null,
 }) {
-  const platformHooks = PLATFORM_TRENDING_HOOKS[activePlatform] || [];
-  const platformFormats = PLATFORM_VIRAL_FORMATS[activePlatform] || [];
-  const platformTopics = PLATFORM_TRENDING_TOPICS[activePlatform] || [];
-  const platformTimes = PLATFORM_PEAK_TIMES[activePlatform] || [];
   const colors = PLATFORM_COLORS[activePlatform] || { primary: '#666' };
 
   return (
@@ -1002,21 +953,36 @@ function PlatformToolsPanel({
             <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
               <TrendingUp className="h-3.5 w-3.5" style={{ color: colors.primary }} />
               Trending Hooks
+              {insightsSource === 'live' && (
+                <span className="text-[9px] text-green-500">• Live</span>
+              )}
             </h4>
             <div className="space-y-2">
-              {platformHooks.map((item, i) => (
-                <button
-                  key={i}
-                  onClick={() => onHookClick?.(item.hook)}
-                  className="w-full rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] p-2.5 text-left transition-all hover:border-[var(--brand-primary)]/50"
-                >
-                  <p className="text-xs text-[var(--text-primary)]">{item.hook}</p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="text-[10px]" style={{ color: colors.primary }}>{item.uses} uses</span>
-                    <span className="text-[10px] text-green-500">{item.engagement}</span>
+              {insightsLoading ? (
+                // Loading skeleton
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="w-full rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] p-2.5 animate-pulse">
+                    <div className="h-3 bg-[var(--glass-border)] rounded w-3/4 mb-2" />
+                    <div className="h-2 bg-[var(--glass-border)] rounded w-1/2" />
                   </div>
-                </button>
-              ))}
+                ))
+              ) : platformHooks.length > 0 ? (
+                platformHooks.map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={() => onHookClick?.(item.hook)}
+                    className="w-full rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] p-2.5 text-left transition-all hover:border-[var(--brand-primary)]/50"
+                  >
+                    <p className="text-xs text-[var(--text-primary)]">{item.hook}</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="text-[10px]" style={{ color: colors.primary }}>{item.uses} uses</span>
+                      <span className="text-[10px] text-green-500">{item.engagement}</span>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <p className="text-xs text-[var(--text-tertiary)] italic">No trending hooks available</p>
+              )}
             </div>
           </div>
 
@@ -1027,16 +993,27 @@ function PlatformToolsPanel({
               Top Formats
             </h4>
             <div className="grid grid-cols-2 gap-2">
-              {platformFormats.map((item) => (
-                <div
-                  key={item.format}
-                  className="rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] p-2.5 text-center transition-colors hover:border-[var(--brand-primary)]/50"
-                >
-                  <p className="text-xs font-medium text-[var(--text-primary)]">{item.format}</p>
-                  <p className="text-[10px] text-green-500">{item.engagement}</p>
-                  <p className="text-[9px] text-[var(--text-tertiary)]">{item.description}</p>
-                </div>
-              ))}
+              {insightsLoading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] p-2.5 text-center animate-pulse">
+                    <div className="h-3 bg-[var(--glass-border)] rounded w-3/4 mx-auto mb-1" />
+                    <div className="h-2 bg-[var(--glass-border)] rounded w-1/2 mx-auto" />
+                  </div>
+                ))
+              ) : platformFormats.length > 0 ? (
+                platformFormats.map((item) => (
+                  <div
+                    key={item.format}
+                    className="rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] p-2.5 text-center transition-colors hover:border-[var(--brand-primary)]/50"
+                  >
+                    <p className="text-xs font-medium text-[var(--text-primary)]">{item.format}</p>
+                    <p className="text-[10px] text-green-500">{item.engagement}</p>
+                    <p className="text-[9px] text-[var(--text-tertiary)]">{item.description}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="col-span-2 text-xs text-[var(--text-tertiary)] italic text-center">No format data available</p>
+              )}
             </div>
           </div>
 
@@ -1047,15 +1024,25 @@ function PlatformToolsPanel({
               Trending Topics
             </h4>
             <div className="flex flex-wrap gap-1.5">
-              {platformTopics.map((tag) => (
-                <button
-                  key={tag}
-                  onClick={() => onHashtagAdd?.(tag.replace('#', ''))}
-                  className="rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2.5 py-1 text-xs transition-colors hover:border-[var(--brand-primary)]/50"
-                >
-                  {tag}
-                </button>
-              ))}
+              {insightsLoading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2.5 py-1 animate-pulse">
+                    <div className="h-3 bg-[var(--glass-border)] rounded w-16" />
+                  </div>
+                ))
+              ) : platformTopics.length > 0 ? (
+                platformTopics.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => onHashtagAdd?.(tag.replace('#', ''))}
+                    className="rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2.5 py-1 text-xs transition-colors hover:border-[var(--brand-primary)]/50"
+                  >
+                    {tag}
+                  </button>
+                ))
+              ) : (
+                <p className="text-xs text-[var(--text-tertiary)] italic">No trending topics available</p>
+              )}
             </div>
           </div>
 
@@ -1064,17 +1051,31 @@ function PlatformToolsPanel({
             <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
               <Clock className="h-3.5 w-3.5" style={{ color: colors.primary }} />
               Peak Post Times
+              {insightsSource === 'live' && (
+                <span className="text-[9px] text-green-500 ml-auto">Based on your audience</span>
+              )}
             </h4>
             <div className="grid grid-cols-2 gap-2">
-              {platformTimes.map((slot) => (
-                <div
-                  key={slot.time}
-                  className="flex items-center justify-between rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2"
-                >
-                  <span className="text-xs text-[var(--text-secondary)]">{slot.time}</span>
-                  <span className="text-xs font-medium text-green-500">{slot.engagement}</span>
-                </div>
-              ))}
+              {insightsLoading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2 animate-pulse">
+                    <div className="h-3 bg-[var(--glass-border)] rounded w-12" />
+                    <div className="h-3 bg-[var(--glass-border)] rounded w-8" />
+                  </div>
+                ))
+              ) : platformTimes.length > 0 ? (
+                platformTimes.map((slot) => (
+                  <div
+                    key={slot.time}
+                    className="flex items-center justify-between rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2"
+                  >
+                    <span className="text-xs text-[var(--text-secondary)]">{slot.time}</span>
+                    <span className="text-xs font-medium text-green-500">{slot.engagement}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="col-span-2 text-xs text-[var(--text-tertiary)] italic text-center">No peak time data</p>
+              )}
             </div>
           </div>
         </div>
@@ -1104,6 +1105,13 @@ export function PostComposerPage({
   const { currentProject } = useAuthStore();
   const projectId = currentProject?.id;
 
+  // Content state - needs to be before the insights hook for activePlatform
+  const [activePlatform, setActivePlatform] = useState('instagram'); // Currently focused platform
+
+  // Fetch real insights for the active platform (peak times, formats, trends, hooks)
+  const insights = useBroadcastInsights(projectId, activePlatform);
+  const insightsData = transformInsightsForComponent(insights);
+
   // Get connected platforms
   const connectedPlatforms = useMemo(() =>
     connections
@@ -1116,7 +1124,7 @@ export function PostComposerPage({
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [platforms, setPlatforms] = useState([]);
-  const [activePlatform, setActivePlatform] = useState('instagram'); // Currently focused platform
+  // activePlatform is declared above (before insights hook)
   const [hashtags, setHashtags] = useState([]);
   const [hashtagInput, setHashtagInput] = useState('');
   const [mediaFiles, setMediaFiles] = useState([]);
@@ -1461,6 +1469,13 @@ export function PostComposerPage({
               onGenerateContent={handleGenerateContent}
               isGenerating={isGenerating}
               onShowAiImageGenerator={() => setShowAiImageGenerator(true)}
+              // Real insights data from API
+              platformHooks={insightsData.platformHooks}
+              platformFormats={insightsData.platformFormats}
+              platformTopics={insightsData.platformTopics}
+              platformTimes={insightsData.platformTimes}
+              insightsLoading={insights.isLoading}
+              insightsSource={insights.source}
             />
           </div>
           
@@ -1680,19 +1695,42 @@ export function PostComposerPage({
                     <Input type="time" value={selectedTime} onChange={(e) => handleTimeChange(e.target.value)} className="w-28 h-9 text-sm bg-[var(--glass-bg)]" />
                   </div>
                   
-                  {/* Optimal times - Horizontal scroll */}
+                  {/* Optimal times - From real insights API */}
                   <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                    <span className="text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">Best:</span>
-                    {SUGGESTED_TIMES.map((slot) => (
-                      <button
-                        key={slot.time}
-                        onClick={() => handleQuickTime(slot.time)}
-                        className="flex items-center gap-1 rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2 py-1 text-[10px] whitespace-nowrap transition-colors hover:border-[var(--brand-primary)]"
-                      >
-                        {slot.time}
-                        <span className="text-emerald-500 font-medium">{slot.engagement}</span>
-                      </button>
-                    ))}
+                    <span className="text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">
+                      Best{insights.source === 'live' ? ' (your audience)' : ''}:
+                    </span>
+                    {insights.isLoading ? (
+                      // Loading skeleton
+                      Array.from({ length: 4 }).map((_, i) => (
+                        <div key={i} className="rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-1 animate-pulse">
+                          <div className="h-3 w-16 bg-[var(--glass-border)] rounded" />
+                        </div>
+                      ))
+                    ) : insightsData.platformTimes.length > 0 ? (
+                      insightsData.platformTimes.map((slot) => (
+                        <button
+                          key={slot.time}
+                          onClick={() => handleQuickTime(slot.time)}
+                          className="flex items-center gap-1 rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2 py-1 text-[10px] whitespace-nowrap transition-colors hover:border-[var(--brand-primary)]"
+                        >
+                          {slot.time}
+                          <span className="text-emerald-500 font-medium">{slot.engagement}</span>
+                        </button>
+                      ))
+                    ) : (
+                      // Fallback to static times if no data
+                      SUGGESTED_TIMES.map((slot) => (
+                        <button
+                          key={slot.time}
+                          onClick={() => handleQuickTime(slot.time)}
+                          className="flex items-center gap-1 rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2 py-1 text-[10px] whitespace-nowrap transition-colors hover:border-[var(--brand-primary)]"
+                        >
+                          {slot.time}
+                          <span className="text-emerald-500 font-medium">{slot.engagement}</span>
+                        </button>
+                      ))
+                    )}
                   </div>
                 </div>
 

@@ -1,17 +1,18 @@
 /**
  * TasksPanel - Task management with filters and project grouping
+ * Migrated to React Query hooks
  */
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { 
-  Plus, Search as SearchIcon, Filter, CheckCircle2, Circle, Clock,
-  AlertCircle, Calendar, User, FolderKanban, MoreVertical, Edit,
-  Trash2, Loader2, GripVertical
+  Plus, Search as SearchIcon, Filter, CheckCircle2,
+  Calendar, User, FolderKanban, MoreVertical, Edit,
+  Trash2, Loader2
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
+import { Card, CardContent } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { Checkbox } from '../ui/checkbox'
 import {
@@ -29,7 +30,13 @@ import {
 import EmptyState from '../EmptyState'
 import ConfirmDialog from '../ConfirmDialog'
 
-import useProjectsStore, { TASK_STATUS_CONFIG } from '../../lib/projects-store'
+import { 
+  useProjectTasks, 
+  useCreateProjectTask, 
+  useUpdateProjectTask, 
+  useDeleteProjectTask,
+  TASK_STATUS_CONFIG 
+} from '@/lib/hooks'
 
 const formatDate = (date) => {
   if (!date) return null
@@ -52,17 +59,6 @@ const getDueDateStatus = (dueDate) => {
 }
 
 const TasksPanel = ({ projects }) => {
-  const {
-    tasks,
-    isLoading,
-    fetchTasks,
-    createTask,
-    updateTask,
-    deleteTask,
-    toggleTaskComplete,
-  } = useProjectsStore()
-
-  // UI State
   const [selectedProjectId, setSelectedProjectId] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -71,7 +67,6 @@ const TasksPanel = ({ projects }) => {
   const [deleteDialog, setDeleteDialog] = useState({ open: false, task: null })
   const [selectedTask, setSelectedTask] = useState(null)
 
-  // Form state
   const [formData, setFormData] = useState({
     projectId: '',
     title: '',
@@ -80,12 +75,15 @@ const TasksPanel = ({ projects }) => {
     dueDate: '',
   })
 
-  // Load tasks for selected project
-  useEffect(() => {
-    if (selectedProjectId && selectedProjectId !== 'all') {
-      fetchTasks(selectedProjectId)
-    }
-  }, [selectedProjectId])
+  // React Query - tasks auto-fetch when selectedProjectId changes
+  const { data: tasksData, isLoading } = useProjectTasks(
+    selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null
+  )
+  const tasks = Array.isArray(tasksData) ? tasksData : (tasksData?.tasks ?? [])
+
+  const createTaskMutation = useCreateProjectTask()
+  const updateTaskMutation = useUpdateProjectTask()
+  const deleteTaskMutation = useDeleteProjectTask()
 
   // Filtered tasks
   const filteredTasks = useMemo(() => {
@@ -133,13 +131,16 @@ const TasksPanel = ({ projects }) => {
   const handleCreate = async (e) => {
     e.preventDefault()
     if (!formData.projectId || !formData.title) return
-    
+
     try {
-      await createTask(formData.projectId, {
-        title: formData.title,
-        description: formData.description,
-        priority: formData.priority,
-        dueDate: formData.dueDate || null,
+      await createTaskMutation.mutateAsync({
+        projectId: formData.projectId,
+        data: {
+          title: formData.title,
+          description: formData.description,
+          priority: formData.priority,
+          dueDate: formData.dueDate || null,
+        },
       })
       toast.success('Task created')
       setCreateDialogOpen(false)
@@ -152,13 +153,17 @@ const TasksPanel = ({ projects }) => {
   const handleEdit = async (e) => {
     e.preventDefault()
     if (!selectedTask) return
-    
+
     try {
-      await updateTask(selectedTask.project_id, selectedTask.id, {
-        title: formData.title,
-        description: formData.description,
-        priority: formData.priority,
-        dueDate: formData.dueDate || null,
+      await updateTaskMutation.mutateAsync({
+        id: selectedTask.id,
+        projectId: selectedTask.project_id,
+        updates: {
+          title: formData.title,
+          description: formData.description,
+          priority: formData.priority,
+          dueDate: formData.dueDate || null,
+        },
       })
       toast.success('Task updated')
       setEditDialogOpen(false)
@@ -170,9 +175,12 @@ const TasksPanel = ({ projects }) => {
 
   const handleDelete = async () => {
     if (!deleteDialog.task) return
-    
+
     try {
-      await deleteTask(deleteDialog.task.project_id, deleteDialog.task.id)
+      await deleteTaskMutation.mutateAsync({
+        id: deleteDialog.task.id,
+        projectId: deleteDialog.task.project_id,
+      })
       toast.success('Task deleted')
       setDeleteDialog({ open: false, task: null })
     } catch (err) {
@@ -182,7 +190,12 @@ const TasksPanel = ({ projects }) => {
 
   const handleToggleComplete = async (task) => {
     try {
-      await toggleTaskComplete(task.project_id, task.id)
+      const newStatus = task.status === 'done' ? 'todo' : 'done'
+      await updateTaskMutation.mutateAsync({
+        id: task.id,
+        projectId: task.project_id,
+        updates: { status: newStatus },
+      })
     } catch (err) {
       toast.error('Failed to update task')
     }

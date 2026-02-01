@@ -1,9 +1,11 @@
 // src/pages/commerce/OfferingDetail.jsx
 // View/Edit offering details
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { useCommerceStore } from '@/lib/commerce-store'
+import { useCommerceOffering, useDeleteCommerceOffering, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import useAuthStore from '@/lib/auth-store'
 import portalApi from '@/lib/portal-api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

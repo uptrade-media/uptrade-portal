@@ -48,6 +48,8 @@ export interface BlogPost {
   /** Rich content */
   table_of_contents?: TocItem[]
   faq_items?: { question: string; answer: string }[]
+  /** E-E-A-T: when present, use as JSON-LD on the post page (Article/FAQ/Person from Signal) */
+  schema?: object | object[]
   service_callouts?: { title: string; description?: string; url?: string }[]
   
   /** Publishing */

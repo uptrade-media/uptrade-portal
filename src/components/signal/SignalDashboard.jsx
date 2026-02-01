@@ -33,7 +33,7 @@ export default function SignalDashboard({ projectId }) {
   useEffect(() => {
     loadData()
     // Refresh every 30 seconds
-    const interval = setInterval(loadData, 30000)
+    const interval = setInterval(loadData, 60_000) // 60s – reduce auth/API load
     return () => clearInterval(interval)
   }, [projectId])
 

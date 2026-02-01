@@ -1,9 +1,11 @@
 // src/components/commerce/CustomerImportExport.jsx
 // Import and export customers via CSV
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useRef } from 'react'
 import useAuthStore from '@/lib/auth-store'
-import { useCommerceStore, getCustomers, createCustomer } from '@/lib/commerce-store'
+import { useCustomers, customersKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,

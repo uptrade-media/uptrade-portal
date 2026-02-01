@@ -1,9 +1,11 @@
 // src/pages/commerce/CustomerDetail.jsx
 // View customer details and purchase history
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { useCommerceStore, getCustomerPurchases } from '@/lib/commerce-store'
+import { useCustomer, useCustomerPurchases, customersKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import useAuthStore from '@/lib/auth-store'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'

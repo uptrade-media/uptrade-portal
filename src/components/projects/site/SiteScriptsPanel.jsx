@@ -10,7 +10,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { useSiteManagementStore } from '@/lib/site-management-store'
+import { 
+  useCreateSiteScript, 
+  useUpdateSiteScript, 
+  useDeleteSiteScript 
+} from '@/lib/hooks'
 import {
   Dialog,
   DialogContent,
@@ -68,7 +72,11 @@ export default function SiteScriptsPanel({ project, scripts = [] }) {
   const [editingScript, setEditingScript] = useState(null)
   const [isDeleting, setIsDeleting] = useState(null)
   const [presetData, setPresetData] = useState(null)
-  const store = useSiteManagementStore()
+  
+  // React Query mutations
+  const createScriptMutation = useCreateSiteScript()
+  const updateScriptMutation = useUpdateSiteScript()
+  const deleteScriptMutation = useDeleteSiteScript()
   
   const activeScripts = scripts.filter(s => s.is_active)
   
@@ -80,7 +88,7 @@ export default function SiteScriptsPanel({ project, scripts = [] }) {
   const handleDelete = async (scriptId) => {
     setIsDeleting(scriptId)
     try {
-      await store.deleteScript(scriptId)
+      await deleteScriptMutation.mutateAsync({ id: scriptId, projectId: project.id })
       toast.success('Script deleted')
     } catch (error) {
       toast.error('Failed to delete script')
@@ -91,7 +99,11 @@ export default function SiteScriptsPanel({ project, scripts = [] }) {
   
   const handleToggleActive = async (script, checked) => {
     try {
-      await store.updateScript(script.id, { is_active: checked })
+      await updateScriptMutation.mutateAsync({ 
+        id: script.id, 
+        projectId: project.id, 
+        data: { is_active: checked } 
+      })
       toast.success(checked ? 'Script activated' : 'Script deactivated')
     } catch (error) {
       toast.error('Failed to update script')
@@ -142,7 +154,7 @@ export default function SiteScriptsPanel({ project, scripts = [] }) {
           }}
           preset={presetData}
           onSubmit={async (data) => {
-            await store.createScript(data)
+            await createScriptMutation.mutateAsync({ projectId: project.id, data })
             toast.success('Script created')
             setIsCreateOpen(false)
             setPresetData(null)
@@ -258,7 +270,7 @@ export default function SiteScriptsPanel({ project, scripts = [] }) {
         }}
         preset={presetData}
         onSubmit={async (data) => {
-          await store.createScript(data)
+          await createScriptMutation.mutateAsync({ projectId: project.id, data })
           toast.success('Script created')
           setIsCreateOpen(false)
           setPresetData(null)
@@ -271,7 +283,11 @@ export default function SiteScriptsPanel({ project, scripts = [] }) {
         open={!!editingScript}
         onOpenChange={(open) => !open && setEditingScript(null)}
         onSubmit={async (data) => {
-          await store.updateScript(editingScript.id, data)
+          await updateScriptMutation.mutateAsync({ 
+            id: editingScript.id, 
+            projectId: project.id, 
+            data 
+          })
           toast.success('Script updated')
           setEditingScript(null)
         }}

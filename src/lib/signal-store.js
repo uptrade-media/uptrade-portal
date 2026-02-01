@@ -16,6 +16,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import axios from 'axios'
 import { supabase } from './supabase-auth'
+import useAuthStore from './auth-store'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Signal API Direct Access
@@ -47,7 +48,6 @@ signalApi.interceptors.request.use(async (config) => {
   
   // Also try to get from auth store for consistency
   try {
-    const { default: useAuthStore } = await import('./auth-store')
     const state = useAuthStore.getState()
     if (state.currentProject?.id) {
       config.headers['X-Project-Id'] = state.currentProject.id
@@ -133,6 +133,9 @@ export const useSignalStore = create(
       suggestionsLoading: false,
       suggestionsPagination: { page: 1, total: 0, pages: 0 },
       suggestionsStats: { byStatus: {}, byType: {} },
+      // 24h cache for suggestions so navigating to Signal doesn't refetch every time
+      suggestionsCache: {},
+      suggestionsCacheTtlMs: 24 * 60 * 60 * 1000,
       
       // Knowledge gaps state (SIGNAL-017)
       knowledgeGaps: [],
@@ -708,17 +711,38 @@ export const useSignalStore = create(
       // ─────────────────────────────────────────────────────────────────────────
       
       fetchSuggestions: async (projectId, options = {}) => {
+        const cacheKey = `${projectId}:${options.status ?? 'all'}:${options.type ?? 'all'}:${options.page ?? 1}`
+        const { suggestionsCache, suggestionsCacheTtlMs } = get()
+        const cached = suggestionsCache?.[cacheKey]
+        if (cached && (Date.now() - cached.fetchedAt) < suggestionsCacheTtlMs) {
+          set({
+            suggestions: cached.data.items ?? cached.data.suggestions ?? [],
+            suggestionsPagination: cached.data.pagination ?? { page: 1, total: 0, pages: 0 },
+            suggestionsStats: cached.data.stats ?? { byStatus: {}, byType: {} },
+            suggestionsLoading: false
+          })
+          return cached.data
+        }
         set({ suggestionsLoading: true })
         try {
           const res = await signalApi.get('/learning/suggestions', { 
             params: { projectId, ...options } 
           })
           const data = res.data?.data || res.data
+          const payload = {
+            items: data.items || data.suggestions || [],
+            pagination: data.pagination || { page: 1, total: 0, pages: 0 },
+            stats: data.stats || { byStatus: {}, byType: {} }
+          }
           set({ 
-            suggestions: data.items || data.suggestions || [],
-            suggestionsPagination: data.pagination || { page: 1, total: 0, pages: 0 },
-            suggestionsStats: data.stats || { byStatus: {}, byType: {} },
-            suggestionsLoading: false
+            suggestions: payload.items,
+            suggestionsPagination: payload.pagination,
+            suggestionsStats: payload.stats,
+            suggestionsLoading: false,
+            suggestionsCache: {
+              ...get().suggestionsCache,
+              [cacheKey]: { data: payload, fetchedAt: Date.now() }
+            }
           })
           return data
         } catch (error) {
@@ -735,7 +759,8 @@ export const useSignalStore = create(
         set(state => ({
           suggestions: state.suggestions.map(s => 
             s.id === suggestionId ? suggestion : s
-          )
+          ),
+          suggestionsCache: {} // invalidate so next fetch is fresh
         }))
         return res.data?.data || res.data
       },
@@ -748,7 +773,8 @@ export const useSignalStore = create(
         set(state => ({
           suggestions: state.suggestions.map(s => 
             s.id === suggestionId ? suggestion : s
-          )
+          ),
+          suggestionsCache: {} // invalidate so next fetch is fresh
         }))
         return res.data?.data || res.data
       },
@@ -762,7 +788,8 @@ export const useSignalStore = create(
         set(state => ({
           suggestions: state.suggestions.map(s => 
             s.id === suggestionId ? suggestion : s
-          )
+          ),
+          suggestionsCache: {} // invalidate so next fetch is fresh
         }))
         return res.data?.data || res.data
       },
@@ -775,7 +802,8 @@ export const useSignalStore = create(
         set(state => ({
           suggestions: state.suggestions.map(s => 
             s.id === suggestionId ? suggestion : s
-          )
+          ),
+          suggestionsCache: {} // invalidate so next fetch is fresh
         }))
         return res.data?.data || res.data
       },
@@ -923,6 +951,7 @@ export const useSignalStore = create(
           activeWidgetMessages: [],
           suggestions: [],
           suggestionsLoading: false,
+          suggestionsCache: {},
           // Knowledge gaps state
           knowledgeGaps: [],
           knowledgeGapsLoading: false,

@@ -1,9 +1,11 @@
 // src/pages/commerce/SalesPage.jsx
 // Sales list and management
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { useCommerceStore } from '@/lib/commerce-store'
+import { useCommerceSales, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import useAuthStore from '@/lib/auth-store'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -231,6 +233,7 @@ export default function SalesPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -340,6 +343,7 @@ export default function SalesPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

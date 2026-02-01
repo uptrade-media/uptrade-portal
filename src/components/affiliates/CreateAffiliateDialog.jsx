@@ -1,5 +1,6 @@
 // src/components/affiliates/CreateAffiliateDialog.jsx
 // Dialog to create a new affiliate
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState } from 'react'
 import { Plus, Globe, Loader2 } from 'lucide-react'
@@ -24,12 +25,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import useAuthStore from '@/lib/auth-store'
-import useAffiliatesStore from '@/lib/affiliates-store'
+import { useCreateAffiliate } from '@/lib/hooks'
 import { toast } from 'sonner'
 
 export default function CreateAffiliateDialog({ children }) {
   const { currentProject } = useAuthStore()
-  const { createAffiliate } = useAffiliatesStore()
+  const createAffiliateMutation = useCreateAffiliate()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isFetchingLogo, setIsFetchingLogo] = useState(false)
@@ -84,7 +85,7 @@ export default function CreateAffiliateDialog({ children }) {
 
     setIsSubmitting(true)
     try {
-      await createAffiliate(currentProject.id, formData)
+      await createAffiliateMutation.mutateAsync({ projectId: currentProject.id, data: formData })
       toast.success('Affiliate created')
       setOpen(false)
       setFormData({

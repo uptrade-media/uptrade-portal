@@ -54,7 +54,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { useSignalStore } from '@/lib/signal-store'
+import { useSignalStore } from '@/lib/signal-store' // Keep for streaming UI state
+import { useSignalSuggestions, useAcceptSignalSuggestion, useDismissSignalSuggestion, signalKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { SignalAmbient, GlowCard, MetricRing } from '../shared/SignalUI'
 import EchoLogo from '@/components/echo/EchoLogo'
 

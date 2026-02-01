@@ -42,7 +42,8 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
 // Stores
-import useProjectsStore from '@/lib/projects-store'
+import { useProjects, useCreateProject, projectsKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import portalApi, { adminApi } from '@/lib/portal-api'
 
 // Module definitions
@@ -98,7 +99,7 @@ export function NewProjectModal({
   preselectedOrgId = null,
   onProjectCreated,
 }) {
-  const { createProject } = useProjectsStore()
+  const createProjectMutation = useCreateProject()
   
   // Wizard state
   const [currentStep, setCurrentStep] = useState(0)
@@ -322,7 +323,7 @@ export function NewProjectModal({
         ...(contactId ? { contactId } : {}),
       }
 
-      const newProject = await createProject(projectData)
+      const newProject = await createProjectMutation.mutateAsync(projectData)
 
       // Step 4: Update project with all settings
       const updateData = {

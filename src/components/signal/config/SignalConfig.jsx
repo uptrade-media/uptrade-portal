@@ -35,7 +35,9 @@ import {
   SelectValue 
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { useSignalStore } from '@/lib/signal-store'
+import { useSignalStore } from '@/lib/signal-store' // Keep for streaming UI state
+import { useSignalConfig, useUpdateSignalConfig, signalKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { configApi, setupApi } from '@/lib/signal-api'
 import { SignalAmbient, GlowCard } from '../shared/SignalUI'
 

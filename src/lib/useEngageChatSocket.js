@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io } from 'socket.io-client'
+import { supabase } from './supabase-auth'
 
 const PORTAL_API_URL = import.meta.env.VITE_PORTAL_API_URL || 'https://api.uptrademedia.com'
 
@@ -12,6 +13,7 @@ const PORTAL_API_URL = import.meta.env.VITE_PORTAL_API_URL || 'https://api.uptra
  * @param {Object} options - Configuration options
  * @param {boolean} options.enabled - Whether to connect
  * @param {string} options.projectId - Project ID to filter sessions
+ * @param {string} options.orgId - Org ID for handoff/org-level events
  * @param {Function} options.onMessage - Callback for new messages
  * @param {Function} options.onVisitorTyping - Callback for visitor typing status
  * @param {Function} options.onSessionUpdate - Callback for session status changes
@@ -21,6 +23,7 @@ const PORTAL_API_URL = import.meta.env.VITE_PORTAL_API_URL || 'https://api.uptra
 export function useEngageChatSocket({
   enabled = true,
   projectId,
+  orgId,
   onMessage,
   onVisitorTyping,
   onSessionUpdate,
@@ -32,8 +35,13 @@ export function useEngageChatSocket({
   const [connectionError, setConnectionError] = useState(null)
   const [visitorTypingStates, setVisitorTypingStates] = useState({}) // { sessionId: { isTyping, timestamp } }
 
-  // Get token from cookie (same pattern as useMessagesSocket)
-  const getToken = useCallback(() => {
+  // Get token: prefer Supabase session (same as Portal API Bearer) so gateway validates correctly.
+  // Fallback to cookie (sb-access-token or sb-<project-ref>-auth-token) for legacy/envs.
+  const getToken = useCallback(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) return session.access_token
+    } catch (_) {}
     const cookies = document.cookie.split(';').reduce((acc, cookie) => {
       const [key, value] = cookie.trim().split('=')
       acc[key] = value
@@ -42,144 +50,110 @@ export function useEngageChatSocket({
     return cookies['sb-access-token'] || cookies['sb-qxnfswulhjrwinosjxon-auth-token']
   }, [])
 
+  const typingCleanupRef = useRef(null)
+
   useEffect(() => {
     if (!enabled) return
 
-    const token = getToken()
-    if (!token) {
-      console.warn('[EngageChatSocket] No auth token found')
-      return
+    const connect = async () => {
+      const token = await getToken()
+      if (!token) {
+        console.warn('[EngageChatSocket] No auth token found (check Supabase session or cookies)')
+        return
+      }
+
+      console.log('[EngageChatSocket] Connecting to Portal API...')
+
+      const socket = io(`${PORTAL_API_URL}/engage/chat`, {
+        auth: { token },
+        query: { projectId, orgId },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+      })
+
+      socketRef.current = socket
+
+      // Connection events
+      socket.on('connect', () => {
+        console.log('[EngageChatSocket] Connected')
+        setIsConnected(true)
+        setConnectionError(null)
+        if (projectId) socket.emit('agent:join-project', { projectId })
+      })
+
+      socket.on('disconnect', (reason) => {
+        console.log('[EngageChatSocket] Disconnected:', reason)
+        setIsConnected(false)
+      })
+
+      socket.on('connect_error', (error) => {
+        console.error('[EngageChatSocket] Connection error:', error.message)
+        setConnectionError(error.message)
+      })
+
+      socket.on('chat:message', (data) => {
+        onMessage?.(data)
+      })
+
+      socket.on('message:sent', () => {})
+
+      socket.on('visitor:typing', (data) => {
+        const { sessionId, isTyping } = data
+        if (isTyping) {
+          setVisitorTypingStates(prev => ({ ...prev, [sessionId]: { isTyping: true, timestamp: Date.now() } }))
+        } else {
+          setVisitorTypingStates(prev => {
+            const newState = { ...prev }
+            delete newState[sessionId]
+            return newState
+          })
+        }
+        onVisitorTyping?.(data)
+      })
+
+      socket.on('session:updated', (session) => {
+        onSessionUpdate?.(session)
+      })
+
+      socket.on('handoff:requested', (data) => {
+        onHandoffRequest?.(data)
+      })
+
+      socket.on('agent:joined', (data) => {
+        onAgentJoined?.(data)
+      })
+
+      socket.on('chat:transferred', (data) => {
+        onSessionUpdate?.(data)
+      })
+
+      typingCleanupRef.current = setInterval(() => {
+        setVisitorTypingStates(prev => {
+          const now = Date.now()
+          const next = {}
+          for (const [sid, state] of Object.entries(prev)) {
+            if (now - state.timestamp < 3000) next[sid] = state
+          }
+          return next
+        })
+      }, 1000)
     }
 
-    console.log('[EngageChatSocket] Connecting to Portal API...')
-
-    // Create socket connection to engage chat namespace
-    const socket = io(`${PORTAL_API_URL}/engage/chat`, {
-      auth: { token },
-      query: { projectId },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    })
-
-    socketRef.current = socket
-
-    // Connection events
-    socket.on('connect', () => {
-      console.log('[EngageChatSocket] Connected')
-      setIsConnected(true)
-      setConnectionError(null)
-
-      // Join project room for agent broadcasts
-      if (projectId) {
-        socket.emit('agent:join-project', { projectId })
-      }
-    })
-
-    socket.on('disconnect', (reason) => {
-      console.log('[EngageChatSocket] Disconnected:', reason)
-      setIsConnected(false)
-    })
-
-    socket.on('connect_error', (error) => {
-      console.error('[EngageChatSocket] Connection error:', error.message)
-      setConnectionError(error.message)
-    })
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Message Events
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    // New message from visitor
-    socket.on('chat:message', (data) => {
-      console.log('[EngageChatSocket] New message:', data.sessionId)
-      onMessage?.(data)
-    })
-
-    // Message sent confirmation
-    socket.on('message:sent', (message) => {
-      console.log('[EngageChatSocket] Message sent:', message.id)
-    })
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Typing Events
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    // Visitor is typing
-    socket.on('visitor:typing', (data) => {
-      const { sessionId, isTyping } = data
-      
-      if (isTyping) {
-        setVisitorTypingStates(prev => ({
-          ...prev,
-          [sessionId]: { isTyping: true, timestamp: Date.now() }
-        }))
-      } else {
-        setVisitorTypingStates(prev => {
-          const newState = { ...prev }
-          delete newState[sessionId]
-          return newState
-        })
-      }
-      
-      onVisitorTyping?.(data)
-    })
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Session Events
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    // Session status changed (ai -> pending_handoff -> human -> closed)
-    socket.on('session:updated', (session) => {
-      console.log('[EngageChatSocket] Session updated:', session.id, session.status)
-      onSessionUpdate?.(session)
-    })
-
-    // Handoff requested by visitor or AI
-    socket.on('handoff:requested', (data) => {
-      console.log('[EngageChatSocket] Handoff requested:', data.session?.id)
-      onHandoffRequest?.(data)
-    })
-
-    // Another agent joined the chat
-    socket.on('agent:joined', (data) => {
-      console.log('[EngageChatSocket] Agent joined:', data.agentName)
-      onAgentJoined?.(data)
-    })
-
-    // Chat transferred to another agent
-    socket.on('chat:transferred', (data) => {
-      console.log('[EngageChatSocket] Chat transferred from:', data.fromAgent?.name)
-      onSessionUpdate?.(data)
-    })
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Cleanup stale typing indicators
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    const typingCleanup = setInterval(() => {
-      setVisitorTypingStates(prev => {
-        const now = Date.now()
-        const newState = {}
-        for (const [sessionId, state] of Object.entries(prev)) {
-          if (now - state.timestamp < 3000) {
-            newState[sessionId] = state
-          }
-        }
-        return newState
-      })
-    }, 1000)
-
+    connect()
     return () => {
-      clearInterval(typingCleanup)
+      if (typingCleanupRef.current) {
+        clearInterval(typingCleanupRef.current)
+        typingCleanupRef.current = null
+      }
+      const socket = socketRef.current
       if (socket) {
-        console.log('[EngageChatSocket] Disconnecting...')
         socket.disconnect()
         socketRef.current = null
       }
     }
-  }, [enabled, projectId])
+  }, [enabled, projectId, orgId, getToken])
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Agent Actions

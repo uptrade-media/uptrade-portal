@@ -1,7 +1,10 @@
 // src/components/seo/SEOPagesList.jsx
 // List of all pages for a site with filtering and actions
-import { useState, useEffect } from 'react'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+// UPDATED: Jan 29, 2026 - Added hierarchical parent/child grouping
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,50 +22,75 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
-  Wand2
+  Wand2,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  Folder,
 } from 'lucide-react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useSeoPages, seoPageKeys } from '@/hooks/seo'
+import { seoApi } from '@/lib/portal-api'
 import SEOBulkEditModal from './SEOBulkEditModal'
+import { cn } from '@/lib/utils'
+
+// Helper to format segment names for display
+function formatSegmentName(segment) {
+  if (!segment) return 'Home'
+  return segment
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
 
 export default function SEOPagesList({ site, projectId }) {
   const navigate = useNavigate()
-  const { 
-    pages,
-    pagesLoading,
-    pagesPagination,
-    fetchPages,
-    crawlSitemap,
-    crawlPage
-  } = useSeoStore()
-
+  const queryClient = useQueryClient()
+  
+  // Local UI state
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [healthFilter, setHealthFilter] = useState('all')
   const [sortBy, setSortBy] = useState('clicks')
+  const [page, setPage] = useState(1)
   const [crawlingPages, setCrawlingPages] = useState(new Set())
   const [crawlingSitemap, setCrawlingSitemap] = useState(false)
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState(new Set())
 
   // Use projectId directly (new architecture) or fallback to site.id (legacy)
   const siteId = projectId || site?.id
 
-  // Fetch pages on mount and when filters change
-  useEffect(() => {
-    if (siteId) {
-      console.log('[SEOPagesList] Fetching pages for siteId:', siteId)
-      fetchPages(siteId, { 
-        search: searchQuery,
-        indexStatus: statusFilter !== 'all' ? statusFilter : undefined,
-        sortBy,
-        limit: 50
-      })
-    }
-  }, [siteId, searchQuery, statusFilter, sortBy])
+  // React Query: Fetch pages with filters
+  // Automatically refetches when filters change!
+  const { 
+    data: pagesData, 
+    isLoading: pagesLoading,
+    refetch: refetchPages
+  } = useSeoPages(siteId, {
+    page,
+    limit: 50,
+    search: searchQuery || undefined,
+    status: statusFilter !== 'all' ? statusFilter : undefined,
+    sortBy,
+  })
 
+  // Extract pages and pagination from response (ensure array; handles raw API shape)
+  const pages = (() => {
+    const p = pagesData?.pages ?? pagesData?.data
+    return Array.isArray(p) ? p : (p?.pages ?? [])
+  })()
+  const pagesPagination = useMemo(() => ({
+    page: pagesData?.page || 1,
+    total: pagesData?.total || 0,
+    totalPages: pagesData?.totalPages || 1,
+  }), [pagesData])
+
+  // Direct API calls for actions (not cached data)
   const handleCrawlSitemap = async () => {
     setCrawlingSitemap(true)
     try {
-      await crawlSitemap(siteId)
+      await seoApi.crawlSitemap(siteId)
+      // Invalidate pages cache to refetch fresh data
+      queryClient.invalidateQueries({ queryKey: seoPageKeys.list(siteId) })
     } finally {
       setCrawlingSitemap(false)
     }
@@ -71,7 +99,10 @@ export default function SEOPagesList({ site, projectId }) {
   const handleCrawlPage = async (pageId) => {
     setCrawlingPages(prev => new Set([...prev, pageId]))
     try {
-      await crawlPage(pageId)
+      await seoApi.crawlPage(pageId)
+      // Invalidate both the specific page and the list
+      queryClient.invalidateQueries({ queryKey: seoPageKeys.detail(pageId) })
+      queryClient.invalidateQueries({ queryKey: seoPageKeys.list(siteId) })
     } finally {
       setCrawlingPages(prev => {
         const next = new Set(prev)
@@ -152,6 +183,26 @@ export default function SEOPagesList({ site, projectId }) {
     return num.toString()
   }
 
+  // Helper to get path from page object
+  const getPagePath = (page) => {
+    if (page.path) {
+      try {
+        const url = new URL(page.path)
+        return url.pathname
+      } catch {
+        return page.path
+      }
+    }
+    if (page.url) {
+      try {
+        return new URL(page.url, 'https://x').pathname
+      } catch {
+        return page.url
+      }
+    }
+    return '/'
+  }
+
   // Filter pages based on health filter
   const filteredPages = pages.filter(page => {
     if (healthFilter === 'all') return true
@@ -160,6 +211,144 @@ export default function SEOPagesList({ site, projectId }) {
     if (healthFilter === 'poor') return page.seo_health_score < 60
     return true
   })
+
+  // Build hierarchical page structure grouped by parent path
+  const { groupedPages, displayRows } = useMemo(() => {
+    // Group pages by their parent path (first segment)
+    const groups = new Map()
+    
+    for (const page of filteredPages) {
+      const path = getPagePath(page)
+      const segments = path.split('/').filter(Boolean)
+      
+      // Root page goes into special "/" group
+      if (segments.length === 0) {
+        const rootGroup = groups.get('/') || { parent: '/', children: [], isRoot: true }
+        rootGroup.children.push({ ...page, displayPath: 'Home', isRoot: true })
+        groups.set('/', rootGroup)
+        continue
+      }
+      
+      // Single segment pages (e.g., /about) go into their own group
+      if (segments.length === 1) {
+        const groupKey = `/${segments[0]}`
+        const group = groups.get(groupKey) || { parent: groupKey, children: [], segment: segments[0] }
+        group.children.push({ ...page, displayPath: `/${segments[0]}`, slug: segments[0], isLeaf: true })
+        groups.set(groupKey, group)
+        continue
+      }
+      
+      // Multi-segment pages (e.g., /blog/post-1) go under their parent
+      const parentKey = `/${segments[0]}`
+      const group = groups.get(parentKey) || { parent: parentKey, children: [], segment: segments[0] }
+      const remainingPath = '/' + segments.slice(1).join('/')
+      group.children.push({ ...page, displayPath: remainingPath, slug: segments.slice(1).join('/'), parentPath: parentKey })
+      groups.set(parentKey, group)
+    }
+    
+    // Sort groups alphabetically, but root first
+    const sortedGroups = Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === '/') return -1
+      if (b === '/') return 1
+      return a.localeCompare(b)
+    })
+    
+    // Sort children within each group
+    for (const [, group] of sortedGroups) {
+      group.children.sort((a, b) => {
+        // Sort by clicks (descending) if sortBy is clicks, otherwise by path
+        if (sortBy === 'clicks') {
+          return (b.clicks_28d || 0) - (a.clicks_28d || 0)
+        }
+        if (sortBy === 'impressions') {
+          return (b.impressions_28d || 0) - (a.impressions_28d || 0)
+        }
+        if (sortBy === 'position') {
+          return (a.avg_position_28d || 100) - (b.avg_position_28d || 100)
+        }
+        if (sortBy === 'health') {
+          return (b.seo_health_score || 0) - (a.seo_health_score || 0)
+        }
+        return (a.displayPath || '').localeCompare(b.displayPath || '')
+      })
+    }
+    
+    // Build flat display rows with expand/collapse logic
+    const rows = []
+    for (const [groupKey, group] of sortedGroups) {
+      const isExpanded = expandedGroups.has(groupKey)
+      const hasMultipleChildren = group.children.length > 1
+      const hasNestedChildren = group.children.some(c => !c.isLeaf && !c.isRoot)
+      
+      // If group only has one page and it's a leaf (like /about), show it directly
+      if (group.children.length === 1 && group.children[0].isLeaf) {
+        rows.push({ type: 'page', page: group.children[0], depth: 0 })
+        continue
+      }
+      
+      // If this is the root group with just the home page, show it directly
+      if (group.isRoot && group.children.length === 1) {
+        rows.push({ type: 'page', page: group.children[0], depth: 0 })
+        continue
+      }
+      
+      // Otherwise show a collapsible group header
+      if (hasMultipleChildren || hasNestedChildren) {
+        // Aggregate stats for the group header
+        const totalClicks = group.children.reduce((sum, c) => sum + (c.clicks_28d || 0), 0)
+        const totalImpressions = group.children.reduce((sum, c) => sum + (c.impressions_28d || 0), 0)
+        const avgPosition = group.children.length > 0 
+          ? group.children.reduce((sum, c) => sum + (c.avg_position_28d || 0), 0) / group.children.length 
+          : null
+        const avgHealth = group.children.length > 0 
+          ? group.children.reduce((sum, c) => sum + (c.seo_health_score || 0), 0) / group.children.length 
+          : null
+        const totalIssues = group.children.reduce((sum, c) => sum + (c.opportunities_count || 0), 0)
+        
+        rows.push({ 
+          type: 'group', 
+          groupKey, 
+          segment: group.segment,
+          childCount: group.children.length,
+          isExpanded,
+          stats: {
+            clicks: totalClicks,
+            impressions: totalImpressions,
+            position: avgPosition,
+            health: avgHealth,
+            issues: totalIssues,
+          }
+        })
+        
+        // Add children if expanded
+        if (isExpanded) {
+          for (const child of group.children) {
+            rows.push({ type: 'page', page: child, depth: 1, parentGroup: groupKey })
+          }
+        }
+      } else {
+        // Single child that's not a leaf, show it directly
+        for (const child of group.children) {
+          rows.push({ type: 'page', page: child, depth: 0 })
+        }
+      }
+    }
+    
+    return { groupedPages: groups, displayRows: rows }
+  }, [filteredPages, sortBy, expandedGroups])
+
+  // Toggle group expansion
+  const toggleGroup = (groupKey) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) {
+        next.delete(groupKey)
+      } else {
+        next.add(groupKey)
+      }
+      return next
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -207,6 +396,7 @@ export default function SEOPagesList({ site, projectId }) {
               <SelectValue placeholder="Sort By" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="path">Path (parent/child)</SelectItem>
               <SelectItem value="clicks">Most Clicks</SelectItem>
               <SelectItem value="impressions">Most Impressions</SelectItem>
               <SelectItem value="position">Best Position</SelectItem>
@@ -234,7 +424,7 @@ export default function SEOPagesList({ site, projectId }) {
             disabled={pages.length === 0}
           >
             <Wand2 className="h-4 w-4 mr-2" />
-            Bulk AI Edit
+            Bulk Signal Edit
           </Button>
         </div>
       </div>
@@ -247,13 +437,8 @@ export default function SEOPagesList({ site, projectId }) {
         pages={filteredPages}
         field="both"
         onComplete={() => {
-          // Refresh pages after bulk edit
-          fetchPages(siteId, { 
-            search: searchQuery,
-            indexStatus: statusFilter !== 'all' ? statusFilter : undefined,
-            sortBy,
-            limit: 50
-          })
+          // Invalidate cache to refetch fresh data
+          queryClient.invalidateQueries({ queryKey: seoPageKeys.list(siteId) })
         }}
       />
 
@@ -264,7 +449,7 @@ export default function SEOPagesList({ site, projectId }) {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-          ) : filteredPages.length === 0 ? (
+          ) : displayRows.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="text-lg mb-2">No pages found</p>
@@ -317,90 +502,161 @@ export default function SEOPagesList({ site, projectId }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {filteredPages.map((page) => (
-                    <tr 
-                      key={page.id}
-                      className="hover:bg-muted/50 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/seo/pages/${page.id}`)}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="max-w-xs">
-                          <p className="text-sm font-medium text-foreground truncate">
-                            {page.title || page.path}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {(() => {
-                              try {
-                                const url = new URL(page.path)
-                                const path = url.pathname + url.search + url.hash
-                                // Show full path for special routes (audit, proposal, invoice)
-                                if (path.includes('/audit') || path.includes('/proposal') || path.includes('/invoice')) {
-                                  return path
-                                }
-                                // For regular pages, just show domain
-                                return url.hostname
-                              } catch {
-                                return page.path
-                              }
-                            })()}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {getIndexStatusBadge(page)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-sm text-foreground">
-                        {formatNumber(page.clicks_28d)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-sm text-foreground">
-                        {formatNumber(page.impressions_28d)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-sm text-foreground">
-                        {page.avg_position_28d?.toFixed(1) || '-'}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {getHealthBadge(page.seo_health_score)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {page.opportunities_count > 0 ? (
-                          <Badge variant="outline" className="text-orange-400 border-orange-500/30">
-                            {page.opportunities_count}
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleCrawlPage(page.id)
-                            }}
-                            disabled={crawlingPages.has(page.id)}
-                          >
-                            {crawlingPages.has(page.id) ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                  {displayRows.map((row, idx) => {
+                    if (row.type === 'group') {
+                      // Render group header row (collapsible)
+                      return (
+                        <tr 
+                          key={`group-${row.groupKey}`}
+                          className="hover:bg-muted/50 cursor-pointer transition-colors bg-muted/20"
+                          onClick={() => toggleGroup(row.groupKey)}
+                        >
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <button className="p-0.5 hover:bg-muted rounded transition-colors">
+                                {row.isExpanded ? (
+                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                )}
+                              </button>
+                              {row.isExpanded ? (
+                                <FolderOpen className="h-4 w-4 text-primary" />
+                              ) : (
+                                <Folder className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <span className="text-sm font-medium text-foreground">
+                                {formatSegmentName(row.segment)}
+                              </span>
+                              <Badge variant="outline" className="text-xs ml-1">
+                                {row.childCount} {row.childCount === 1 ? 'page' : 'pages'}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-xs text-muted-foreground">-</span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                            {formatNumber(row.stats.clicks)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                            {formatNumber(row.stats.impressions)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                            {row.stats.position?.toFixed(1) || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {getHealthBadge(Math.round(row.stats.health))}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {row.stats.issues > 0 ? (
+                              <Badge variant="outline" className="text-orange-400 border-orange-500/30">
+                                {row.stats.issues}
+                              </Badge>
                             ) : (
-                              <RefreshCw className="h-4 w-4" />
+                              <span className="text-xs text-muted-foreground">-</span>
                             )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              window.open(page.url, '_blank')
-                            }}
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="w-[72px]" /> {/* Spacer for actions column */}
+                          </td>
+                        </tr>
+                      )
+                    }
+                    
+                    // Render regular page row
+                    const page = row.page
+                    const isChild = row.depth > 0
+                    
+                    return (
+                      <tr 
+                        key={page.id}
+                        className={cn(
+                          "hover:bg-muted/50 cursor-pointer transition-colors",
+                          isChild && "bg-background"
+                        )}
+                        onClick={() => navigate(`/seo/pages/${page.id}`)}
+                      >
+                        <td className="px-4 py-3">
+                          <div className={cn("max-w-xs", isChild && "ml-8")}>
+                            <div className="flex items-center gap-2">
+                              {isChild && (
+                                <span className="text-muted-foreground text-xs">└</span>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-foreground truncate">
+                                  {page.title || page.displayPath || page.path}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {isChild ? page.displayPath : (() => {
+                                    try {
+                                      const url = new URL(page.path)
+                                      return url.pathname
+                                    } catch {
+                                      return page.path
+                                    }
+                                  })()}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {getIndexStatusBadge(page)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-foreground">
+                          {formatNumber(page.clicks_28d)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-foreground">
+                          {formatNumber(page.impressions_28d)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-foreground">
+                          {page.avg_position_28d?.toFixed(1) || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {getHealthBadge(page.seo_health_score)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {page.opportunities_count > 0 ? (
+                            <Badge variant="outline" className="text-orange-400 border-orange-500/30">
+                              {page.opportunities_count}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleCrawlPage(page.id)
+                              }}
+                              disabled={crawlingPages.has(page.id)}
+                            >
+                              {crawlingPages.has(page.id) ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                window.open(page.url || page.path, '_blank')
+                              }}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -418,8 +674,8 @@ export default function SEOPagesList({ site, projectId }) {
             <Button
               variant="outline"
               size="sm"
-              disabled={pagesPagination.page <= 1}
-              onClick={() => fetchPages(siteId, { page: pagesPagination.page - 1, limit: 50 })}
+              disabled={page <= 1 || pagesLoading}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
             >
               Previous
             </Button>
@@ -429,8 +685,8 @@ export default function SEOPagesList({ site, projectId }) {
             <Button
               variant="outline"
               size="sm"
-              disabled={pagesPagination.page >= pagesPagination.totalPages}
-              onClick={() => fetchPages(siteId, { page: pagesPagination.page + 1, limit: 50 })}
+              disabled={page >= pagesPagination.totalPages || pagesLoading}
+              onClick={() => setPage(p => p + 1)}
             >
               Next
             </Button>

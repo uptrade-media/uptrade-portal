@@ -220,37 +220,25 @@ export default function CRMRemindersManager({ projectId, brandColors }) {
 
     setIsCreating(true)
     try {
+      // Build payload - pushToCalendar is now handled by the backend
       const payload = {
-        ...reminderForm,
-        project_id: projectId,
+        title: reminderForm.title,
+        dueAt: reminderForm.remind_at,
+        reminderType: reminderForm.reminder_type || 'follow_up',
+        notes: reminderForm.description,
+        projectId: projectId,
+        // Backend will create calendar event automatically unless this is false
+        pushToCalendar: reminderForm.schedule_sync_event !== false,
       }
 
-      let response
       if (editingReminder) {
-        response = await crmApi.updateReminder(editingReminder.id, payload)
+        await crmApi.updateReminder(editingReminder.id, payload)
         toast.success('Reminder updated')
       } else {
-        response = await crmApi.createReminder(reminderForm.prospect_id || projectId, payload)
-        toast.success('Reminder created')
-        
-        // If scheduled with Sync, create calendar event
-        if (reminderForm.schedule_sync_event && reminderForm.remind_at) {
-          try {
-            await syncApi.createEvent({
-              title: `Reminder: ${reminderForm.title}`,
-              description: reminderForm.description,
-              start_time: reminderForm.remind_at,
-              duration: reminderForm.sync_event_duration,
-              event_type: 'reminder',
-              related_id: response.data.id,
-              related_type: 'crm_reminder'
-            })
-            toast.success('Calendar event created in Sync')
-          } catch (err) {
-            console.error('Failed to create Sync event:', err)
-            toast.error('Reminder created but calendar event failed')
-          }
-        }
+        await crmApi.createReminder(reminderForm.prospect_id || projectId, payload)
+        toast.success(reminderForm.schedule_sync_event !== false 
+          ? 'Reminder created with calendar event' 
+          : 'Reminder created')
       }
 
       fetchReminders()

@@ -994,7 +994,8 @@ export function generateBreadcrumbSchema(
 
 /**
  * Generate all relevant schemas for a blog post in a single array
- * This is the recommended way to include multiple schemas
+ * This is the recommended way to include multiple schemas.
+ * When post has E-E-A-T schema (post.schema), use it instead of generating Article/FAQ.
  */
 export function generateAllBlogSchemas(
   post: BlogPost,
@@ -1002,17 +1003,25 @@ export function generateAllBlogSchemas(
 ): object[] {
   const schemas: object[] = []
 
-  // 1. Article/BlogPosting schema (always)
-  schemas.push(generateBlogPostSchema(post, options))
+  // E-E-A-T: use pre-built schema from Signal when present
+  const eeatSchema = post.schema
+  if (eeatSchema) {
+    const arr = Array.isArray(eeatSchema) ? eeatSchema : [eeatSchema]
+    schemas.push(...arr)
+  } else {
+    // 1. Article/BlogPosting schema (always)
+    schemas.push(generateBlogPostSchema(post, options))
+
+    // 3. FAQ schema (if FAQs present)
+    const faqItems = post.faq_items ?? (post as any).faqItems
+    if (faqItems && faqItems.length > 0) {
+      const faqSchema = generateFaqSchema(faqItems)
+      if (faqSchema) schemas.push(faqSchema)
+    }
+  }
 
   // 2. Breadcrumb schema (always)
   schemas.push(generateBreadcrumbSchema(post, options))
-
-  // 3. FAQ schema (if FAQs present)
-  if (post.faq_items && post.faq_items.length > 0) {
-    const faqSchema = generateFaqSchema(post.faq_items)
-    if (faqSchema) schemas.push(faqSchema)
-  }
 
   return schemas
 }

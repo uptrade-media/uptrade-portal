@@ -1,11 +1,13 @@
 // src/pages/commerce/OfferingCreate.jsx
 // Create new offering form - supports all types
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
-import { useCommerceStore, createSchedule, uploadOfferingImage } from '@/lib/commerce-store'
-import { useFormsStore } from '@/lib/forms-store'
-import { useSeoStore } from '@/lib/seo-store'
+import { useCreateCommerceOffering, useCreateCommerceSchedule, useUploadCommerceImage, commerceKeys } from '@/lib/hooks'
+import { useForms, formsKeys } from '@/lib/hooks'
+import { useSeoPages } from '@/hooks/seo'
+import { useQueryClient } from '@tanstack/react-query'
 import useAuthStore from '@/lib/auth-store'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -71,7 +73,9 @@ export default function OfferingCreate({ type: propType, embedded = false, onBac
   const { currentProject } = useAuthStore()
   const { createOffering, settings } = useCommerceStore()
   const { forms, fetchForms, isLoading: formsLoading } = useFormsStore()
-  const { pages: seoPages, fetchPages, pagesLoading } = useSeoStore()
+  // Use React Query hook for SEO pages
+  const { data: seoPagesResponse, isLoading: pagesLoading } = useSeoPages(currentProject?.id, { limit: 200 })
+  const seoPages = seoPagesResponse?.data?.pages || seoPagesResponse?.pages || []
 
   // Check if coming from Signal generation
   const isFromSignal = searchParams.get('signal') === 'true'
@@ -158,11 +162,9 @@ export default function OfferingCreate({ type: propType, embedded = false, onBac
       fetchForms({ projectId: currentProject.id }).catch(err => {
         console.warn('Failed to fetch forms:', err)
       })
-      fetchPages(currentProject.id, { limit: 200 }).catch(err => {
-        console.warn('Failed to fetch SEO pages:', err)
-      })
+      // SEO pages are now fetched via React Query hook automatically
     }
-  }, [currentProject?.id, fetchForms, fetchPages])
+  }, [currentProject?.id, fetchForms])
 
   // Image upload handlers
   const handleDragOver = useCallback((e) => {

@@ -1,7 +1,11 @@
 // src/components/seo/local/LocalSeoCitations.jsx
 // Citation Management - NAP consistency tracking across sources
+// MIGRATED TO REACT QUERY - Jan 29, 2026
 import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useSeoCitations, useScanCitations, seoLocalKeys } from '@/hooks/seo'
+import { useQueryClient } from '@tanstack/react-query'
+import useAuthStore from '@/lib/auth-store'
+import BusinessProfileCard from '@/components/shared/BusinessProfileCard'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -51,27 +55,24 @@ const CITATION_SOURCES = [
 ]
 
 export default function LocalSeoCitations({ projectId }) {
+  const queryClient = useQueryClient()
   const [isLoading, setIsLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
 
-  const { 
-    citations,
-    fetchCitations,
-    citationsLoading,
-    canonicalNap // The "correct" NAP to compare against
-  } = useSeoStore()
+  // React Query hooks for citations
+  const { data: citationsData = [], isLoading: citationsLoading, refetch: refetchCitations } = useSeoCitations(projectId)
+  const scanCitationsMutation = useScanCitations()
 
-  useEffect(() => {
-    if (projectId) {
-      fetchCitations(projectId)
-    }
-  }, [projectId])
+  // Ensure citations is always an array
+  const citations = Array.isArray(citationsData) ? citationsData : []
+
+  const { currentProject: project } = useAuthStore()
 
   const handleRefresh = async () => {
     setIsLoading(true)
     try {
-      await fetchCitations(projectId)
+      await refetchCitations()
     } catch (error) {
       console.error('Failed to fetch citations:', error)
     }
@@ -136,54 +137,14 @@ export default function LocalSeoCitations({ projectId }) {
         </div>
       </div>
 
-      {/* Canonical NAP Card */}
-      <Card className="bg-[var(--glass-bg)] border-[var(--glass-border)]">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-[var(--brand-primary)]" />
-            Canonical Business Information
-          </CardTitle>
-          <CardDescription>
-            Your official NAP (Name, Address, Phone) that all citations should match
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {canonicalNap ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="flex items-start gap-3">
-                <Building2 className="h-5 w-5 text-[var(--text-secondary)] mt-0.5" />
-                <div>
-                  <p className="text-sm text-[var(--text-secondary)]">Business Name</p>
-                  <p className="font-medium text-[var(--text-primary)]">{canonicalNap.name}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <MapPin className="h-5 w-5 text-[var(--text-secondary)] mt-0.5" />
-                <div>
-                  <p className="text-sm text-[var(--text-secondary)]">Address</p>
-                  <p className="font-medium text-[var(--text-primary)]">{canonicalNap.address}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Phone className="h-5 w-5 text-[var(--text-secondary)] mt-0.5" />
-                <div>
-                  <p className="text-sm text-[var(--text-secondary)]">Phone</p>
-                  <p className="font-medium text-[var(--text-primary)]">{canonicalNap.phone}</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-4">
-              <p className="text-[var(--text-secondary)]">
-                Set up your canonical business information to track consistency
-              </p>
-              <Button variant="outline" className="mt-2">
-                Configure NAP
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Canonical NAP Card - Use shared BusinessProfileCard */}
+      <BusinessProfileCard
+        data={project}
+        mode="display"
+        showIndustry={false}
+        title="Canonical Business Information"
+        description="Your official NAP (Name, Address, Phone) that all citations should match"
+      />
 
       {/* Stats Overview */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

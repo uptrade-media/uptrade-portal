@@ -17,6 +17,10 @@ export interface ScanResults {
   metadata: DetectedMetadata[]
   widgets: DetectedWidget[]
   sitemaps: DetectedSitemap[]
+  schemas: DetectedSchema[]
+  faqs: DetectedFAQ[]
+  analytics: DetectedAnalytics[]
+  images: DetectedImage[]
 }
 
 export interface DetectedForm {
@@ -44,9 +48,11 @@ export interface DetectedField {
 
 export interface DetectedMetadata {
   filePath: string
-  type: 'next-metadata' | 'head' | 'next-seo' | 'other'
+  type: 'next-metadata' | 'head' | 'next-seo' | 'no-metadata' | 'other'
   title?: string
   description?: string
+  isClientComponent?: boolean
+  hasLayout?: boolean
 }
 
 export interface DetectedWidget {
@@ -66,6 +72,44 @@ export interface DetectedSitemap {
   details?: Record<string, unknown>
 }
 
+export interface DetectedSchema {
+  filePath: string
+  type: 'json-ld' | 'microdata' | 'rdfa' | 'organization' | 'local-business' | 'service' | 'product' | 'article' | 'faq-schema'
+  schemaType?: string  // e.g., 'LocalBusiness', 'FAQPage', 'Organization'
+  startLine: number
+  endLine: number
+  content?: string
+}
+
+export interface DetectedFAQ {
+  filePath: string
+  type: 'accordion' | 'details-summary' | 'static-list' | 'component'
+  componentName?: string
+  itemCount?: number
+  startLine: number
+  endLine: number
+  hasSchema: boolean
+}
+
+export interface DetectedAnalytics {
+  filePath: string
+  type: 'google-analytics' | 'google-tag-manager' | 'vercel-analytics' | 'posthog' | 'mixpanel' | 'plausible' | 'fathom' | 'other'
+  scriptTag?: string
+  trackingId?: string
+  startLine: number
+  endLine: number
+}
+
+export interface DetectedImage {
+  filePath: string
+  type: 'next-image' | 'img' | 'background-image'
+  src?: string
+  alt?: string
+  isLocal: boolean
+  startLine: number
+  endLine: number
+}
+
 // ============================================
 // Main Scanner
 // ============================================
@@ -76,6 +120,10 @@ export async function scanCodebase(rootDir: string): Promise<ScanResults> {
     metadata: [],
     widgets: [],
     sitemaps: [],
+    schemas: [],
+    faqs: [],
+    analytics: [],
+    images: [],
   }
 
   // Find all TSX/JSX files
@@ -108,6 +156,22 @@ export async function scanCodebase(rootDir: string): Promise<ScanResults> {
       const sitemaps = scanForSitemaps(content, relPath)
       results.sitemaps.push(...sitemaps)
 
+      // Scan for schema markup
+      const schemas = scanForSchemas(ast, content, relPath)
+      results.schemas.push(...schemas)
+
+      // Scan for FAQ sections
+      const faqs = scanForFAQs(ast, content, relPath)
+      results.faqs.push(...faqs)
+
+      // Scan for analytics
+      const analytics = scanForAnalytics(ast, content, relPath)
+      results.analytics.push(...analytics)
+
+      // Scan for images
+      const images = scanForImages(ast, content, relPath)
+      results.images.push(...images)
+
     } catch (error) {
       // Skip files that can't be parsed
       continue
@@ -117,6 +181,28 @@ export async function scanCodebase(rootDir: string): Promise<ScanResults> {
   // Also scan for sitemap config files and static sitemaps
   const sitemapFiles = await scanForSitemapFiles(rootDir)
   results.sitemaps.push(...sitemapFiles)
+
+  // Post-process metadata: filter out pages that have a layout with metadata in the same directory
+  const layoutsWithMetadata = new Set<string>()
+  for (const meta of results.metadata) {
+    if (meta.filePath.includes('/layout.') && meta.type !== 'no-metadata') {
+      // Extract the directory path
+      const dir = meta.filePath.replace(/\/layout\.(tsx?|jsx?)$/, '')
+      layoutsWithMetadata.add(dir)
+    }
+  }
+
+  // Filter out no-metadata pages if their directory has a layout with metadata
+  results.metadata = results.metadata.filter(meta => {
+    if (meta.type === 'no-metadata') {
+      const dir = meta.filePath.replace(/\/page\.(tsx?|jsx?)$/, '')
+      if (layoutsWithMetadata.has(dir)) {
+        return false // Skip - layout handles metadata
+      }
+      meta.hasLayout = false
+    }
+    return true
+  })
 
   return results
 }
@@ -507,9 +593,25 @@ function extractSubmitUrl(content: string): string | null {
 
 function scanForMetadata(ast: any, content: string, filePath: string): DetectedMetadata[] {
   const metadata: DetectedMetadata[] = []
+  
+  // Only scan page.tsx/jsx and layout.tsx/jsx files
+  const isPageFile = /\/page\.(tsx?|jsx?)$/.test(filePath)
+  const isLayoutFile = /\/layout\.(tsx?|jsx?)$/.test(filePath)
+  
+  if (!isPageFile && !isLayoutFile) {
+    return metadata
+  }
+
+  // Check if this is a client component
+  const isClientComponent = /['"]use client['"]/.test(content.split('\n').slice(0, 5).join('\n'))
+  
+  // Check if already using getManagedMetadata
+  if (content.includes('getManagedMetadata')) {
+    return metadata // Already migrated
+  }
 
   // Check for Next.js metadata export
-  if (content.includes('export const metadata') || content.includes('export const generateMetadata')) {
+  if (content.includes('export const metadata') || content.includes('export async function generateMetadata')) {
     let title: string | undefined
     let description: string | undefined
 
@@ -524,7 +626,9 @@ function scanForMetadata(ast: any, content: string, filePath: string): DetectedM
       type: 'next-metadata',
       title,
       description,
+      isClientComponent,
     })
+    return metadata
   }
 
   // Check for next-seo
@@ -532,21 +636,44 @@ function scanForMetadata(ast: any, content: string, filePath: string): DetectedM
     metadata.push({
       filePath,
       type: 'next-seo',
+      isClientComponent,
     })
+    return metadata
   }
 
   // Check for Head component
+  let hasHeadComponent = false
   traverse(ast, {
     JSXElement(path) {
       const opening = path.node.openingElement
       if (t.isJSXIdentifier(opening.name) && opening.name.name === 'Head') {
-        metadata.push({
-          filePath,
-          type: 'head',
-        })
+        hasHeadComponent = true
+        path.stop()
       }
     }
   })
+  
+  if (hasHeadComponent) {
+    metadata.push({
+      filePath,
+      type: 'head',
+      isClientComponent,
+    })
+    return metadata
+  }
+
+  // If this is a page file with no metadata at all, flag it for migration
+  if (isPageFile) {
+    // Check if there's a layout in the same directory with metadata
+    const dir = filePath.replace(/\/page\.(tsx?|jsx?)$/, '')
+    
+    metadata.push({
+      filePath,
+      type: 'no-metadata',
+      isClientComponent,
+      // hasLayout will be determined by the caller
+    })
+  }
 
   return metadata
 }
@@ -778,8 +905,407 @@ function extractExcludePaths(content: string): string[] {
 }
 
 // ============================================
+// Schema Scanner
+// ============================================
+
+/**
+ * Scan for JSON-LD schema markup in files
+ */
+function scanForSchemas(ast: any, content: string, filePath: string): DetectedSchema[] {
+  const schemas: DetectedSchema[] = []
+
+  // Skip if already using site-kit
+  if (content.includes('@uptrade/site-kit') && content.includes('ManagedSchema')) {
+    return schemas
+  }
+
+  // Check for JSON-LD script tags
+  traverse(ast, {
+    JSXElement(path) {
+      const opening = path.node.openingElement
+      if (t.isJSXIdentifier(opening.name) && 
+          (opening.name.name === 'script' || opening.name.name === 'Script')) {
+        const typeAttr = opening.attributes.find(
+          attr => t.isJSXAttribute(attr) && 
+                  t.isJSXIdentifier(attr.name) && 
+                  attr.name.name === 'type'
+        )
+
+        if (typeAttr && t.isJSXAttribute(typeAttr)) {
+          let typeValue = ''
+          if (t.isStringLiteral(typeAttr.value)) {
+            typeValue = typeAttr.value.value
+          }
+
+          if (typeValue === 'application/ld+json') {
+            // Extract schema type from content
+            let schemaType = 'Unknown'
+            const typeMatch = content.match(/"@type"\s*:\s*"([^"]+)"/)
+            if (typeMatch) {
+              schemaType = typeMatch[1]
+            }
+
+            // Map to our schema types
+            let detectedType: DetectedSchema['type'] = 'json-ld'
+            if (schemaType === 'FAQPage') detectedType = 'faq-schema'
+            else if (schemaType === 'Organization') detectedType = 'organization'
+            else if (schemaType === 'LocalBusiness' || schemaType.includes('Business')) detectedType = 'local-business'
+            else if (schemaType === 'Service' || schemaType.includes('Service')) detectedType = 'service'
+            else if (schemaType === 'Product') detectedType = 'product'
+            else if (schemaType === 'Article' || schemaType === 'BlogPosting') detectedType = 'article'
+
+            schemas.push({
+              filePath,
+              type: detectedType,
+              schemaType,
+              startLine: path.node.loc?.start.line || 0,
+              endLine: path.node.loc?.end.line || 0,
+            })
+          }
+        }
+      }
+    }
+  })
+
+  // Check for structured data in objects (e.g., const schema = { "@context": ... })
+  const jsonLdPattern = /@context["']?\s*:\s*["']https?:\/\/schema\.org/
+  if (jsonLdPattern.test(content)) {
+    const typeMatch = content.match(/@type["']?\s*:\s*["']([^"']+)["']/)
+    if (typeMatch && !schemas.some(s => s.schemaType === typeMatch[1])) {
+      schemas.push({
+        filePath,
+        type: 'json-ld',
+        schemaType: typeMatch[1],
+        startLine: findLineNumber(content, '@context'),
+        endLine: findLineNumber(content, '@context') + 20,
+      })
+    }
+  }
+
+  return schemas
+}
+
+// ============================================
+// FAQ Scanner
+// ============================================
+
+/**
+ * Scan for FAQ sections (accordions, details/summary, etc.)
+ */
+function scanForFAQs(ast: any, content: string, filePath: string): DetectedFAQ[] {
+  const faqs: DetectedFAQ[] = []
+
+  // Skip if already using site-kit
+  if (content.includes('@uptrade/site-kit') && content.includes('ManagedFAQ')) {
+    return faqs
+  }
+
+  // Check for FAQ-related components
+  const faqPatterns = [
+    /FAQ|Faq|faq/,
+    /Accordion/i,
+    /questions?\s*(?:and|&)?\s*answers?/i,
+  ]
+
+  traverse(ast, {
+    JSXElement(path) {
+      const opening = path.node.openingElement
+      let tagName = ''
+
+      if (t.isJSXIdentifier(opening.name)) {
+        tagName = opening.name.name
+      } else if (t.isJSXMemberExpression(opening.name)) {
+        // Handle things like Accordion.Item
+        if (t.isJSXIdentifier(opening.name.object)) {
+          tagName = opening.name.object.name
+        }
+      }
+
+      // Check for details/summary elements
+      if (tagName === 'details') {
+        faqs.push({
+          filePath,
+          type: 'details-summary',
+          startLine: path.node.loc?.start.line || 0,
+          endLine: path.node.loc?.end.line || 0,
+          hasSchema: content.includes('FAQPage') || content.includes('application/ld+json'),
+        })
+        return
+      }
+
+      // Check for FAQ/Accordion components
+      for (const pattern of faqPatterns) {
+        if (pattern.test(tagName)) {
+          // Count items if possible
+          let itemCount = 0
+          path.traverse({
+            JSXElement(itemPath: any) {
+              const itemOpening = itemPath.node.openingElement
+              if (t.isJSXIdentifier(itemOpening.name)) {
+                const itemName = itemOpening.name.name.toLowerCase()
+                if (itemName.includes('item') || itemName.includes('question')) {
+                  itemCount++
+                }
+              }
+            }
+          })
+
+          faqs.push({
+            filePath,
+            type: 'accordion',
+            componentName: tagName,
+            itemCount: itemCount || undefined,
+            startLine: path.node.loc?.start.line || 0,
+            endLine: path.node.loc?.end.line || 0,
+            hasSchema: content.includes('FAQPage') || content.includes('application/ld+json'),
+          })
+          return
+        }
+      }
+    }
+  })
+
+  return faqs
+}
+
+/**
+ * Scan codebase for ManagedFAQ component usage and return unique path props (string literals only).
+ * Used by `faqs sync` to register FAQ sections in the Portal so they show up in SEO Managed FAQs.
+ */
+export async function scanForManagedFAQPaths(rootDir: string): Promise<string[]> {
+  const paths = new Set<string>()
+  const files = await findSourceFiles(rootDir)
+
+  for (const file of files) {
+    let content: string
+    try {
+      content = await fs.readFile(file, 'utf-8')
+    } catch {
+      continue
+    }
+    if (!content.includes('ManagedFAQ')) continue
+
+    try {
+      const ast = parse(content, {
+        sourceType: 'module',
+        plugins: ['jsx', 'typescript'],
+      })
+
+      traverse(ast, {
+        JSXElement(jsxPath) {
+          const opening = jsxPath.node.openingElement
+          const name = opening.name
+          let tagName = ''
+          if (t.isJSXIdentifier(name)) {
+            tagName = name.name
+          } else if (t.isJSXMemberExpression(name) && t.isJSXIdentifier(name.property)) {
+            tagName = name.property.name
+          }
+          if (tagName !== 'ManagedFAQ') return
+
+          for (const attr of opening.attributes) {
+            if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) continue
+            if (attr.name.name !== 'path') continue
+            const value = attr.value
+            if (t.isStringLiteral(value)) {
+              let p = value.value
+              if (typeof p !== 'string') continue
+              if (!p.startsWith('/')) p = `/${p}`
+              paths.add(p)
+            }
+          }
+        },
+      })
+    } catch {
+      continue
+    }
+  }
+
+  return [...paths]
+}
+
+// ============================================
+// Analytics Scanner
+// ============================================
+
+/**
+ * Scan for analytics scripts and packages
+ */
+function scanForAnalytics(ast: any, content: string, filePath: string): DetectedAnalytics[] {
+  const analytics: DetectedAnalytics[] = []
+
+  const analyticsPatterns: Array<{ 
+    pattern: RegExp
+    type: DetectedAnalytics['type']
+    idPattern?: RegExp 
+  }> = [
+    { 
+      pattern: /googletagmanager\.com|gtag|google-analytics/i, 
+      type: 'google-analytics',
+      idPattern: /(?:G-|UA-|GTM-)[\w-]+/
+    },
+    { 
+      pattern: /gtm\.js|GTM-/i, 
+      type: 'google-tag-manager',
+      idPattern: /GTM-[\w]+/
+    },
+    { 
+      pattern: /@vercel\/analytics|vercel\.com.*analytics/i, 
+      type: 'vercel-analytics'
+    },
+    { 
+      pattern: /posthog/i, 
+      type: 'posthog',
+      idPattern: /phc_[\w]+/
+    },
+    { 
+      pattern: /mixpanel/i, 
+      type: 'mixpanel'
+    },
+    { 
+      pattern: /plausible\.io/i, 
+      type: 'plausible'
+    },
+    { 
+      pattern: /usefathom\.com|fathom/i, 
+      type: 'fathom'
+    },
+  ]
+
+  for (const { pattern, type, idPattern } of analyticsPatterns) {
+    if (pattern.test(content)) {
+      let trackingId: string | undefined
+      if (idPattern) {
+        const match = content.match(idPattern)
+        if (match) trackingId = match[0]
+      }
+
+      // Find line number
+      const lines = content.split('\n')
+      let startLine = 1
+      for (let i = 0; i < lines.length; i++) {
+        if (pattern.test(lines[i])) {
+          startLine = i + 1
+          break
+        }
+      }
+
+      analytics.push({
+        filePath,
+        type,
+        trackingId,
+        startLine,
+        endLine: startLine + 5,
+      })
+    }
+  }
+
+  return analytics
+}
+
+// ============================================
+// Image Scanner
+// ============================================
+
+/**
+ * Scan for images that could be Portal-managed
+ */
+function scanForImages(ast: any, content: string, filePath: string): DetectedImage[] {
+  const images: DetectedImage[] = []
+
+  // Skip if file is in public or assets folder (static assets)
+  if (filePath.includes('/public/') || filePath.includes('/assets/')) {
+    return images
+  }
+
+  traverse(ast, {
+    JSXElement(path) {
+      const opening = path.node.openingElement
+      if (!t.isJSXIdentifier(opening.name)) return
+
+      const tagName = opening.name.name
+
+      // Check for img or Image (Next.js) tags
+      if (tagName === 'img' || tagName === 'Image') {
+        let src = ''
+        let alt = ''
+
+        for (const attr of opening.attributes) {
+          if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) continue
+
+          const attrName = attr.name.name
+          let attrValue = ''
+
+          if (t.isStringLiteral(attr.value)) {
+            attrValue = attr.value.value
+          } else if (t.isJSXExpressionContainer(attr.value) && t.isStringLiteral(attr.value.expression)) {
+            attrValue = attr.value.expression.value
+          }
+
+          if (attrName === 'src') src = attrValue
+          if (attrName === 'alt') alt = attrValue
+        }
+
+        // Skip already-managed images
+        if (src.includes('uptrade') || src.includes('portal')) {
+          return
+        }
+
+        // Determine if local
+        const isLocal = !src.startsWith('http') && !src.startsWith('//')
+
+        images.push({
+          filePath,
+          type: tagName === 'Image' ? 'next-image' : 'img',
+          src: src || undefined,
+          alt: alt || undefined,
+          isLocal,
+          startLine: path.node.loc?.start.line || 0,
+          endLine: path.node.loc?.end.line || 0,
+        })
+      }
+    }
+  })
+
+  // Also check for CSS background-image in style attributes or styled-components
+  const bgImagePattern = /background(?:-image)?:\s*url\(['"]?([^'")]+)['"]?\)/g
+  let match
+  while ((match = bgImagePattern.exec(content)) !== null) {
+    const src = match[1]
+    if (src.includes('uptrade') || src.includes('portal')) continue
+
+    images.push({
+      filePath,
+      type: 'background-image',
+      src,
+      isLocal: !src.startsWith('http') && !src.startsWith('//'),
+      startLine: findLineNumber(content, match[0]),
+      endLine: findLineNumber(content, match[0]),
+    })
+  }
+
+  return images
+}
+
+// ============================================
 // Exports
 // ============================================
 
-export { scanForForms, scanForMetadata, scanForWidgets, scanForSitemaps, scanForSitemapFiles }
-export type { DetectedSitemap }
+export { 
+  scanForForms, 
+  scanForMetadata, 
+  scanForWidgets, 
+  scanForSitemaps, 
+  scanForSitemapFiles,
+  scanForSchemas,
+  scanForFAQs,
+  scanForAnalytics,
+  scanForImages,
+}
+export type { 
+  DetectedSitemap, 
+  DetectedSchema, 
+  DetectedFAQ, 
+  DetectedAnalytics, 
+  DetectedImage 
+}

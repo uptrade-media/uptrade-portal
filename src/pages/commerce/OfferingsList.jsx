@@ -1,16 +1,20 @@
 // src/pages/commerce/CommerceOfferings.jsx
 // Unified offerings list - view and manage products, services, classes, events
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import useAuthStore from '@/lib/auth-store'
 import { useBrandColors } from '@/hooks/useBrandColors'
-import { useCommerceStore, getOfferings, deleteOffering } from '@/lib/commerce-store'
+import { useCommerceSettings, useCommerceOfferings, useDeleteCommerceOffering, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
+import { commerceApi } from '@/lib/portal-api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { CardSkeleton, TableSkeleton } from '@/components/skeletons'
 import {
   Select,
   SelectContent,
@@ -80,9 +84,8 @@ export default function CommerceOfferings({ type: typeProp }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const { currentProject } = useAuthStore()
   const brandColors = useBrandColors()
-  const { settings, fetchSettings } = useCommerceStore()
-  
   const projectId = currentProject?.id
+  const { data: settings } = useCommerceSettings(projectId)
   // Use prop if provided, otherwise fall back to search params
   const typeFilter = typeProp || searchParams.get('type') || 'all'
   const statusFilter = searchParams.get('status') || 'all'
@@ -103,14 +106,7 @@ export default function CommerceOfferings({ type: typeProp }) {
     return settings?.enabled_types || ['product', 'service']
   }, [settings])
   
-  // Load settings on mount
-  useEffect(() => {
-    if (projectId && !settings) {
-      fetchSettings(projectId)
-    }
-  }, [projectId, settings, fetchSettings])
-  
-  // Load offerings
+  // Load offerings (settings loaded via useCommerceSettings)
   useEffect(() => {
     loadOfferings()
   }, [projectId, typeFilter, statusFilter, searchQuery])
@@ -126,8 +122,10 @@ export default function CommerceOfferings({ type: typeProp }) {
       if (statusFilter !== 'all') filters.status = statusFilter
       if (searchQuery) filters.search = searchQuery
       
-      const data = await getOfferings(projectId, filters)
-      setOfferings(data || [])
+      const res = await commerceApi.getOfferings(projectId, filters)
+      const data = res?.data ?? res
+      const list = Array.isArray(data) ? data : data?.offerings ?? data?.data ?? []
+      setOfferings(list)
     } catch (err) {
       console.error('Failed to load offerings:', err)
       setError(err.response?.data?.message || err.message)
@@ -162,7 +160,7 @@ export default function CommerceOfferings({ type: typeProp }) {
     setIsDeleting(true)
     
     try {
-      await deleteOffering(offeringToDelete.id)
+      await commerceApi.deleteOffering(projectId, offeringToDelete.id)
       setOfferings(prev => prev.filter(o => o.id !== offeringToDelete.id))
       setDeleteDialogOpen(false)
       setOfferingToDelete(null)
@@ -319,15 +317,17 @@ export default function CommerceOfferings({ type: typeProp }) {
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
         {isLoading ? (
-          <div className={cn(
-            viewMode === 'grid' 
-              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-              : "space-y-3"
-          )}>
-            {[...Array(8)].map((_, i) => (
-              <Skeleton key={i} className={viewMode === 'grid' ? "h-48" : "h-20"} />
-            ))}
-          </div>
+          viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {[...Array(8)].map((_, i) => (
+                <CardSkeleton key={i} showHeader={true} contentLines={2} />
+              ))}
+            </div>
+          ) : (
+            <div className="border rounded-lg overflow-hidden">
+              <TableSkeleton rows={6} cols={5} showHeader={true} />
+            </div>
+          )
         ) : error ? (
           <Card className="max-w-lg mx-auto mt-12">
             <CardContent className="p-6 text-center">
@@ -338,46 +338,29 @@ export default function CommerceOfferings({ type: typeProp }) {
             </CardContent>
           </Card>
         ) : sortedOfferings.length === 0 ? (
-          <Card className="max-w-lg mx-auto mt-12">
-            <CardContent className="p-8 text-center">
-              <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="font-semibold mb-2">
-                {searchQuery || typeFilter !== 'all' || statusFilter !== 'all'
+          <div className="max-w-lg mx-auto mt-12">
+            <EmptyState
+              icon={Package}
+              title={
+                searchQuery || typeFilter !== 'all' || statusFilter !== 'all'
                   ? 'No offerings match your filters'
-                  : 'No offerings yet'}
-              </h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                {searchQuery || typeFilter !== 'all' || statusFilter !== 'all'
+                  : 'No offerings yet'
+              }
+              description={
+                searchQuery || typeFilter !== 'all' || statusFilter !== 'all'
                   ? 'Try adjusting your search or filters'
-                  : 'Create your first product, service, class, or event'}
-              </p>
-              {!(searchQuery || typeFilter !== 'all' || statusFilter !== 'all') && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button style={{ backgroundColor: primary }}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Offering
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    {enabledTypes.map(type => {
-                      const config = TYPE_CONFIG[type]
-                      const Icon = config?.icon || Package
-                      return (
-                        <DropdownMenuItem
-                          key={type}
-                          onClick={() => navigate(`/commerce/offerings/new?type=${type}`)}
-                        >
-                          <Icon className="h-4 w-4 mr-2" style={{ color: getTypeColor(type) }} />
-                          Add {config?.label?.slice(0, -1) || type}
-                        </DropdownMenuItem>
-                      )
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </CardContent>
-          </Card>
+                  : 'Create your first product, service, class, or event'
+              }
+              actionLabel={
+                !(searchQuery || typeFilter !== 'all' || statusFilter !== 'all') ? 'Create Offering' : undefined
+              }
+              onAction={
+                !(searchQuery || typeFilter !== 'all' || statusFilter !== 'all')
+                  ? () => navigate('/commerce/offerings/new')
+                  : undefined
+              }
+            />
+          </div>
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {sortedOfferings.map(offering => (

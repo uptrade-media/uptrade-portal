@@ -1,7 +1,10 @@
 // src/components/seo/SEOBacklinks.jsx
 // Backlink Opportunities - discover and track link building opportunities
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { useSeoBacklinks, seoTechnicalKeys } from '@/hooks/seo'
+import { seoApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,28 +22,23 @@ import {
 } from 'lucide-react'
 
 export default function SEOBacklinks({ projectId }) {
-  const { 
-    backlinkOpportunities, 
-    backlinksSummary,
-    backlinksLoading, 
-    fetchBacklinkOpportunities,
-    discoverBacklinks,
-    updateBacklinkOpportunity
-  } = useSeoStore()
+  const queryClient = useQueryClient()
+  
+  // React Query hooks
+  const { data: backlinksData, isLoading: backlinksLoading } = useSeoBacklinks(projectId)
+  
+  // Extract data
+  const backlinkOpportunities = backlinksData?.opportunities || backlinksData || []
+  const backlinksSummary = backlinksData?.summary || {}
   
   const [isDiscovering, setIsDiscovering] = useState(false)
   const [filter, setFilter] = useState('all')
 
-  useEffect(() => {
-    if (projectId) {
-      fetchBacklinkOpportunities(projectId)
-    }
-  }, [projectId])
-
   const handleDiscover = async () => {
     setIsDiscovering(true)
     try {
-      await discoverBacklinks(projectId)
+      await seoApi.discoverBacklinks(projectId)
+      queryClient.invalidateQueries({ queryKey: seoTechnicalKeys.backlinks(projectId) })
     } catch (error) {
       console.error('Discovery error:', error)
     }
@@ -49,7 +47,8 @@ export default function SEOBacklinks({ projectId }) {
 
   const handleStatusChange = async (opportunityId, status) => {
     try {
-      await updateBacklinkOpportunity(opportunityId, status)
+      await seoApi.updateBacklinkOpportunity(opportunityId, status)
+      queryClient.invalidateQueries({ queryKey: seoTechnicalKeys.backlinks(projectId) })
     } catch (error) {
       console.error('Status update error:', error)
     }

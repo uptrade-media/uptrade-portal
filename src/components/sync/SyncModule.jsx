@@ -1,9 +1,9 @@
 // src/components/sync/SyncModule.jsx
-// Sync Module - Motion-inspired Calendar & Scheduling
-// Clean, beautiful calendar design with AI-powered scheduling
+// Sync Module - uses ModuleLayout for consistent shell (left sidebar, calendar, right sidebar)
+// Motion-inspired Calendar & Scheduling with AI-powered scheduling
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   Calendar,
   Clock,
@@ -17,7 +17,6 @@ import {
   ExternalLink,
   Link2,
   CalendarPlus,
-  Loader2,
   AlertCircle,
   CheckCircle,
   ChevronDown,
@@ -40,14 +39,14 @@ import {
   Trash2,
   Eye,
   EyeOff,
-  PanelLeftClose,
-  PanelRightClose,
   CalendarCheck,
   CalendarOff,
   Lightbulb,
   History,
   FileText,
-  HelpCircle
+  HelpCircle,
+  BarChart3,
+  Zap
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -78,10 +77,16 @@ import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
 import useAuthStore from '@/lib/auth-store'
 import { useSignalAccess } from '@/lib/signal-access'
-import { portalApi } from '@/lib/portal-api'
+import { portalApi, syncApi } from '@/lib/portal-api'
 import { syncApi as signalSyncApi } from '@/lib/signal-api'
 import { toast } from 'sonner'
+import { ModuleLayout } from '@/components/ModuleLayout'
+import { UptradeSpinner } from '@/components/UptradeLoading'
+import { MODULE_ICONS } from '@/lib/module-icons'
 
+// Import modal/panel components
+import PlanDayDialog from './PlanDayDialog'
+import PlaybooksPanel from './PlaybooksPanel'
 // Import modal components
 import CreateEventModal from './CreateEventModal'
 import BookingTypesPanel from './BookingTypesPanel'
@@ -89,6 +94,9 @@ import BookingsListPanel from './BookingsListPanel'
 import HostsPanel from './HostsPanel'
 import AvailabilityExceptionsPanel from './AvailabilityExceptionsPanel'
 import CalendarConnectionsPanel from './CalendarConnectionsPanel'
+import UnifiedTasksPanel from './UnifiedTasksPanel'
+import TeamTasksPanel from './TeamTasksPanel'
+import AdminOverviewPanel from './AdminOverviewPanel'
 
 // Color palette for events (Motion-inspired with Uptrade teal/emerald)
 const EVENT_COLORS = {
@@ -275,6 +283,11 @@ export default function SyncModule({ className }) {
   const [showRightSidebar, setShowRightSidebar] = useState(true)
   const [showLeftSidebar, setShowLeftSidebar] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  const [rightSidebarMode, setRightSidebarMode] = useState('tasks') // 'tasks' | 'calendar' | 'playbooks'
+  
+  // Task view mode state (personal / team / overview)
+  const [taskViewMode, setTaskViewMode] = useState('personal') // 'personal' | 'team' | 'overview'
+  const [userPermissions, setUserPermissions] = useState(null)
   
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -284,6 +297,7 @@ export default function SyncModule({ className }) {
   const [showHostsPanel, setShowHostsPanel] = useState(false)
   const [showExceptionsPanel, setShowExceptionsPanel] = useState(false)
   const [showCalendarConnections, setShowCalendarConnections] = useState(null) // host object or null
+  const [showPlanDay, setShowPlanDay] = useState(false)
   const [hosts, setHosts] = useState([])
   
   // Calendar visibility (source filtering)
@@ -545,6 +559,25 @@ export default function SyncModule({ className }) {
     loadHosts()
   }, [loadHosts])
   
+  // Load user permissions for task view modes
+  const loadUserPermissions = useCallback(async () => {
+    try {
+      const result = await syncApi.getUserPermissions(currentProject?.id)
+      setUserPermissions(result.data || result)
+    } catch (err) {
+      console.error('Failed to load user permissions:', err)
+      // Default to personal view only
+      setUserPermissions({
+        available_views: ['personal'],
+        current_role: null,
+      })
+    }
+  }, [currentProject?.id])
+  
+  useEffect(() => {
+    loadUserPermissions()
+  }, [loadUserPermissions])
+  
   // ==================== Signal AI Handlers ====================
   
   // Load AI Daily Briefing
@@ -669,183 +702,115 @@ export default function SyncModule({ className }) {
     return Math.max(0, Math.min(100, (currentPosition / totalHours) * 100))
   }
 
-  return (
-    <TooltipProvider>
-      <div className={cn("h-[calc(100vh-120px)] flex flex-col bg-background overflow-hidden", className)}>
-        {/* ===== TOP HEADER BAR ===== */}
-        <div className="flex-shrink-0 h-14 border-b flex items-center justify-between px-4 bg-card/50">
-          {/* Left: Branding + Date Navigation */}
-          <div className="flex items-center gap-4">
-            {/* Toggle Left Sidebar */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8" 
-                  onClick={() => setShowLeftSidebar(!showLeftSidebar)}
-                >
-                  <PanelLeftClose className={cn("h-4 w-4 transition-transform", !showLeftSidebar && "rotate-180")} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{showLeftSidebar ? 'Hide sidebar' : 'Show sidebar'}</TooltipContent>
-            </Tooltip>
-            
-            {/* Logo */}
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-sm">
-                <Calendar className="h-4 w-4 text-white" />
-              </div>
-              <span className="font-semibold text-lg hidden lg:inline">Sync</span>
-              {signalEnabled && (
-                <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px] px-1.5 hidden sm:flex">
-                  <Sparkles className="h-3 w-3 mr-1" />
-                  AI
-                </Badge>
-              )}
-            </div>
-            
-            {/* Date Navigation */}
-            <div className="flex items-center gap-2 ml-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={goToToday}
+  const subtitle = viewMode === 'week'
+    ? `${weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    : selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+
+  const headerActions = (
+    <div className="flex items-center gap-2 flex-wrap">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={goToToday}
+        className={cn(
+          "h-8 px-3",
+          isToday && "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+        )}
+      >
+        Today
+      </Button>
+      <div className="flex items-center border rounded-md">
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-none rounded-l-md" onClick={() => navigateDate(-1)}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-none rounded-r-md" onClick={() => navigateDate(1)}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+      <span className="font-medium text-sm min-w-[140px] hidden sm:inline">
+        {viewMode === 'week'
+          ? `${weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+          : selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+        }
+      </span>
+      <Button size="sm" className="gap-1.5 hidden md:flex" style={{ backgroundColor: 'var(--brand-primary)' }} onClick={() => setShowPlanDay(true)}>
+        <Zap className="h-4 w-4" />
+        Plan my day
+      </Button>
+      <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hidden md:flex" onClick={() => setShowBookingTypes(true)}>
+        <Link2 className="h-4 w-4" />
+        Booking links
+      </Button>
+      <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hidden md:flex" onClick={() => setShowBookingsList(true)}>
+        <CalendarCheck className="h-4 w-4" />
+        Bookings
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hidden md:flex">
+            <Settings className="h-4 w-4" />
+            Display
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem onClick={() => setShowLeftSidebar(!showLeftSidebar)}>
+            {showLeftSidebar ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
+            {showLeftSidebar ? 'Hide' : 'Show'} left sidebar
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setShowRightSidebar(!showRightSidebar)}>
+            {showRightSidebar ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
+            {showRightSidebar ? 'Hide' : 'Show'} right sidebar
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={loadCalendarData}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh calendar
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={loadCalendarData} disabled={loading}>
+        <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+      </Button>
+      <div className="flex border rounded-md overflow-hidden">
+        {[
+          { id: 'day', label: 'Day', icon: CalendarDays },
+          { id: 'week', label: 'Week', icon: LayoutGrid },
+        ].map((mode) => (
+          <Tooltip key={mode.id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setViewMode(mode.id)}
                 className={cn(
-                  "h-8 px-3",
-                  isToday && "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+                  "h-8 px-3 text-xs font-medium transition-colors flex items-center gap-1.5",
+                  viewMode === mode.id ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"
                 )}
               >
-                Today
-              </Button>
-              <div className="flex items-center border rounded-md">
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-none rounded-l-md" onClick={() => navigateDate(-1)}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-none rounded-r-md" onClick={() => navigateDate(1)}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-              <span className="font-medium text-sm min-w-[180px]">
-                {viewMode === 'week' 
-                  ? `${weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                  : selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-                }
-              </span>
-            </div>
-          </div>
-          
-          {/* Right: Actions */}
-          <div className="flex items-center gap-2">
-            {/* Booking Links */}
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="gap-1.5 text-muted-foreground hidden md:flex"
-              onClick={() => setShowBookingTypes(true)}
-            >
-              <Link2 className="h-4 w-4" />
-              Booking links
-            </Button>
-            
-            {/* View Bookings */}
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="gap-1.5 text-muted-foreground hidden md:flex"
-              onClick={() => setShowBookingsList(true)}
-            >
-              <CalendarCheck className="h-4 w-4" />
-              Bookings
-            </Button>
-            
-            {/* Display Options */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hidden md:flex">
-                  <Settings className="h-4 w-4" />
-                  Display
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={() => setShowLeftSidebar(!showLeftSidebar)}>
-                  {showLeftSidebar ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-                  {showLeftSidebar ? 'Hide' : 'Show'} left sidebar
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setShowRightSidebar(!showRightSidebar)}>
-                  {showRightSidebar ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-                  {showRightSidebar ? 'Hide' : 'Show'} right sidebar
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={loadCalendarData}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh calendar
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            
-            {/* Refresh (mobile) */}
-            <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={loadCalendarData} disabled={loading}>
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            </Button>
-            
-            {/* View Mode Toggle */}
-            <div className="flex border rounded-md overflow-hidden">
-              {[
-                { id: 'day', label: 'Day', icon: CalendarDays },
-                { id: 'week', label: 'Week', icon: LayoutGrid },
-              ].map((mode) => (
-                <Tooltip key={mode.id}>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => setViewMode(mode.id)}
-                      className={cn(
-                        "h-8 px-3 text-xs font-medium transition-colors flex items-center gap-1.5",
-                        viewMode === mode.id 
-                          ? "bg-primary text-primary-foreground" 
-                          : "hover:bg-muted text-muted-foreground"
-                      )}
-                    >
-                      <mode.icon className="h-3.5 w-3.5" />
-                      <span className="hidden sm:inline">{mode.label}</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{mode.label} view</TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-            
-            {/* Toggle Right Sidebar */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8" 
-                  onClick={() => setShowRightSidebar(!showRightSidebar)}
-                >
-                  <PanelRightClose className={cn("h-4 w-4 transition-transform", !showRightSidebar && "rotate-180")} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{showRightSidebar ? 'Hide sidebar' : 'Show sidebar'}</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-        
-        {/* ===== MAIN CONTENT AREA ===== */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* ===== LEFT SIDEBAR ===== */}
-          <AnimatePresence>
-            {showLeftSidebar && (
-              <motion.div
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 240, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                transition={{ duration: 0.15, ease: 'easeOut' }}
-                className="flex-shrink-0 border-r overflow-hidden bg-muted/30"
-              >
-                <ScrollArea className="h-full">
-                  <div className="p-4 space-y-6">
+                <mode.icon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{mode.label}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{mode.label} view</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </div>
+  )
+
+  return (
+    <TooltipProvider>
+      <ModuleLayout
+        ariaLabel="Sync"
+        className={className}
+        leftSidebarOpen={showLeftSidebar}
+        rightSidebarOpen={showRightSidebar}
+        onLeftSidebarOpenChange={setShowLeftSidebar}
+        onRightSidebarOpenChange={setShowRightSidebar}
+        leftSidebarTitle="Views"
+        rightSidebarTitle="Tasks & calendar"
+        leftSidebarWidth={240}
+        rightSidebarWidth={320}
+        leftSidebar={(
+          <div className="p-4 space-y-6">
                     {/* Quick Actions */}
                     <div className="space-y-2">
                       <DropdownMenu>
@@ -893,7 +858,7 @@ export default function SyncModule({ className }) {
                     
                     {/* Navigation */}
                     <div className="space-y-1">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Views</p>
+                      <p className="uppercase tracking-wider text-muted-foreground mb-2">Views</p>
                       {[
                         { icon: Calendar, label: 'Calendar', active: true, onClick: () => {} },
                         { icon: CalendarCheck, label: 'Bookings', badge: null, onClick: () => setShowBookingsList(true) },
@@ -905,9 +870,9 @@ export default function SyncModule({ className }) {
                           key={item.label}
                           onClick={item.onClick}
                           className={cn(
-                            "w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2.5 transition-colors",
+                            "w-full text-left px-3 py-2 rounded-md flex items-center gap-2.5 transition-colors",
                             item.active 
-                              ? "bg-primary/10 text-primary font-medium" 
+                              ? "bg-primary/10 text-primary" 
                               : "hover:bg-muted text-foreground"
                           )}
                         >
@@ -925,7 +890,7 @@ export default function SyncModule({ className }) {
                     {/* Current Project */}
                     {currentProject && (
                       <div className="space-y-2">
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Project</p>
+                        <p className="uppercase tracking-wider text-muted-foreground">Project</p>
                         <div className="flex items-center gap-2.5 px-3 py-2 rounded-md bg-muted/50">
                           <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                           <span className="text-sm font-medium truncate">{currentProject.name || currentProject.title}</span>
@@ -936,8 +901,8 @@ export default function SyncModule({ className }) {
                     {/* Signal AI Features */}
                     {signalEnabled && (
                       <div className="space-y-2">
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                          <Sparkles className="h-3 w-3 text-emerald-500" />
+                        <p className="uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                          <Sparkles className="h-3 w-3 text-[var(--brand-primary)]" />
                           AI Features
                         </p>
                         <div className="p-3 rounded-lg border border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5 space-y-1">
@@ -947,8 +912,8 @@ export default function SyncModule({ className }) {
                             className="w-full text-left px-2 py-1.5 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
                           >
                             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
-                              {aiLoading === 'focus' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Focus className="h-4 w-4" />}
-                              <span className="text-sm font-medium">Auto Focus Time</span>
+                              {aiLoading === 'focus' ? <UptradeSpinner size="sm" className="[&_svg]:!h-4 [&_svg]:!w-4 [&_p]:hidden" /> : <Focus className="h-4 w-4" />}
+                              <span>Auto Focus Time</span>
                             </div>
                           </button>
                           <button 
@@ -957,8 +922,8 @@ export default function SyncModule({ className }) {
                             className="w-full text-left px-2 py-1.5 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
                           >
                             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
-                              {aiLoading === 'briefing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sun className="h-4 w-4" />}
-                              <span className="text-sm font-medium">Daily Briefing</span>
+                              {aiLoading === 'briefing' ? <UptradeSpinner size="sm" className="[&_svg]:!h-4 [&_svg]:!w-4 [&_p]:hidden" /> : <Sun className="h-4 w-4" />}
+                              <span>Daily Briefing</span>
                             </div>
                           </button>
                           <button 
@@ -977,7 +942,7 @@ export default function SyncModule({ className }) {
                             className="w-full text-left px-2 py-1.5 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
                           >
                             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
-                              {aiLoading === 'prep' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+                              {aiLoading === 'prep' ? <UptradeSpinner size="sm" className="[&_svg]:!h-4 [&_svg]:!w-4 [&_p]:hidden" /> : <Target className="h-4 w-4" />}
                               <span className="text-sm font-medium">Meeting Prep</span>
                             </div>
                           </button>
@@ -985,19 +950,295 @@ export default function SyncModule({ className }) {
                       </div>
                     )}
                   </div>
-                </ScrollArea>
-              </motion.div>
+        )}
+        rightSidebar={(
+          <>
+            {/* Sidebar Mode Tabs */}
+            <div className="flex border-b bg-background/50">
+              <button
+                onClick={() => setRightSidebarMode('tasks')}
+                className={cn(
+                  "flex-1 py-2.5 transition-colors relative",
+                  rightSidebarMode === 'tasks' ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <div className="flex items-center justify-center gap-1.5">
+                  <Target className="h-4 w-4" />
+                  Tasks
+                </div>
+                {rightSidebarMode === 'tasks' && (
+                  <motion.div layoutId="sidebarTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />
+                )}
+              </button>
+              <button
+                onClick={() => setRightSidebarMode('playbooks')}
+                className={cn(
+                  "flex-1 py-2.5 transition-colors relative",
+                  rightSidebarMode === 'playbooks' ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <div className="flex items-center justify-center gap-1.5">
+                  <Zap className="h-4 w-4" />
+                  Playbooks
+                </div>
+                {rightSidebarMode === 'playbooks' && (
+                  <motion.div layoutId="sidebarTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />
+                )}
+              </button>
+              <button
+                onClick={() => setRightSidebarMode('calendar')}
+                className={cn(
+                  "flex-1 py-2.5 transition-colors relative",
+                  rightSidebarMode === 'calendar' ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <div className="flex items-center justify-center gap-1.5">
+                  <Calendar className="h-4 w-4" />
+                  Calendar
+                </div>
+                {rightSidebarMode === 'calendar' && (
+                  <motion.div layoutId="sidebarTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />
+                )}
+              </button>
+            </div>
+
+            {rightSidebarMode === 'tasks' && (
+              <div className="h-full flex flex-col">
+                {userPermissions?.available_views?.length > 1 && (
+                  <div className="px-4 pt-3 pb-2 border-b flex gap-1">
+                    {userPermissions.available_views.includes('personal') && (
+                      <button
+                        onClick={() => setTaskViewMode('personal')}
+                        className={cn(
+                          "px-3 py-1.5 rounded-md transition-colors",
+                          taskViewMode === 'personal' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        My Tasks
+                      </button>
+                    )}
+                    {userPermissions.available_views.includes('team') && (
+                      <button
+                        onClick={() => setTaskViewMode('team')}
+                        className={cn(
+                          "px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1",
+                          taskViewMode === 'team' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                        Team
+                      </button>
+                    )}
+                    {userPermissions.available_views.includes('overview') && (
+                      <button
+                        onClick={() => setTaskViewMode('overview')}
+                        className={cn(
+                          "px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1",
+                          taskViewMode === 'overview' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        <BarChart3 className="h-3.5 w-3.5" />
+                        Overview
+                      </button>
+                    )}
+                  </div>
+                )}
+                <div className="flex-1 overflow-auto p-4">
+                  {taskViewMode === 'personal' && (
+                    <UnifiedTasksPanel
+                      projectId={currentProject?.id}
+                      className="h-full"
+                      onTaskClick={(task) => toast.info(`Viewing: ${task.title}`)}
+                    />
+                  )}
+                  {taskViewMode === 'team' && (
+                    <TeamTasksPanel
+                      projectId={currentProject?.id}
+                      className="h-full"
+                      onMemberClick={(member) => toast.info(`Viewing tasks for: ${member.name}`)}
+                    />
+                  )}
+                  {taskViewMode === 'overview' && (
+                    <AdminOverviewPanel
+                      orgId={currentOrg?.id}
+                      projectId={currentProject?.id}
+                      className="h-full"
+                    />
+                  )}
+                </div>
+              </div>
             )}
-          </AnimatePresence>
-          
-          {/* ===== MAIN CALENDAR GRID ===== */}
-          <div className="flex-1 overflow-auto bg-background">
+
+            {rightSidebarMode === 'playbooks' && (
+              <div className="h-full overflow-auto p-4">
+                <PlaybooksPanel
+                  className="h-full"
+                  onTasksCreated={() => {
+                    setRightSidebarMode('tasks')
+                    toast.success('Tasks created! Switching to tasks view.')
+                  }}
+                />
+              </div>
+            )}
+
+            {rightSidebarMode === 'calendar' && (
+              <ScrollArea className="h-full">
+                <MiniCalendar selectedDate={selectedDate} setSelectedDate={setSelectedDate} events={filteredEvents} />
+                <div className="px-4 py-3 border-t">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="uppercase tracking-wider text-muted-foreground">Sources</span>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      {calendarSources.map(source => {
+                        const SourceIcon = source.icon
+                        return (
+                          <label key={source.id} className="flex items-center gap-2.5 cursor-pointer group">
+                            <Checkbox
+                              checked={source.visible}
+                              onCheckedChange={(checked) => {
+                                setCalendarSources(sources => sources.map(s =>
+                                  s.id === source.id ? { ...s, visible: checked } : s
+                                ))
+                              }}
+                              className={cn(
+                                "border-2 transition-colors",
+                                source.color === 'rose' && "border-rose-500 data-[state=checked]:bg-rose-500 data-[state=checked]:border-rose-500",
+                                source.color === 'teal' && "border-teal-500 data-[state=checked]:bg-teal-500 data-[state=checked]:border-teal-500"
+                              )}
+                            />
+                            <SourceIcon className="h-4 w-4 text-muted-foreground" />
+                            <span className="group-hover:text-foreground transition-colors">{source.name}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    {projectList.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="uppercase tracking-wider text-muted-foreground">Projects</p>
+                        <div className="space-y-2">
+                          {projectList.map((project) => {
+                            const isOpen = expandedProjects[project.id] ?? true
+                            return (
+                              <div key={project.id} className="rounded-md border bg-background/60">
+                                <button
+                                  type="button"
+                                  className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/50"
+                                  onClick={() => setExpandedProjects(prev => ({ ...prev, [project.id]: !isOpen }))}
+                                >
+                                  <span className="truncate">{project.name || project.title}</span>
+                                  <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", isOpen && "rotate-180")} />
+                                </button>
+                                {isOpen && (
+                                  <div className="px-3 pb-3 space-y-2 border-t pt-2">
+                                    {getProjectCalendarSources(project.id).length === 0 ? (
+                                      <p className="text-muted-foreground">No calendars</p>
+                                    ) : (
+                                      getProjectCalendarSources(project.id).map(cal => {
+                                        const calSource = calendarSources.find(s => s.id === cal.id)
+                                        if (!calSource) return null
+                                        const CalIcon = calSource.icon
+                                        return (
+                                          <label key={cal.id} className="flex items-center gap-2 cursor-pointer">
+                                            <Checkbox
+                                              checked={calSource.visible}
+                                              onCheckedChange={(checked) => {
+                                                setCalendarSources(sources => sources.map(s =>
+                                                  s.id === cal.id ? { ...s, visible: checked } : s
+                                                ))
+                                              }}
+                                              className="border-2"
+                                            />
+                                            <CalIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                                            <span className="truncate">{cal.name || cal.id}</span>
+                                          </label>
+                                        )
+                                      })
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="px-4 py-3 border-t">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="uppercase tracking-wider text-muted-foreground">Agenda</span>
+                    <Badge variant="secondary" className="text-[10px] h-5">
+                      {isSameDay(selectedDate, today) ? 'Today' : selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {getEventsForDay(selectedDate).length === 0 ? (
+                      <p className="text-muted-foreground text-center py-6">No events scheduled</p>
+                    ) : (
+                      getEventsForDay(selectedDate).slice(0, 6).map((event, i) => {
+                        const colors = EVENT_COLORS[event.color] || EVENT_COLORS.default
+                        return (
+                          <motion.div
+                            key={event.id || i}
+                            className="flex items-start gap-2.5 p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
+                            whileHover={{ x: 2 }}
+                          >
+                            <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: colors.accent }} />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{event.title}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {formatTime(event.startTime)} – {formatTime(event.endTime)}
+                              </div>
+                            </div>
+                          </motion.div>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+                {signalEnabled && (
+                  <div className="px-4 py-3 border-t">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Sparkles className="h-3.5 w-3.5 text-[var(--brand-primary)]" />
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">AI Insights</span>
+                    </div>
+                    <div className="space-y-2">
+                      <motion.div
+                        className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-500/20"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                      >
+                        <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300 mb-1">Schedule Analysis</p>
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                          You have 2.5 hours of focus time available this afternoon.
+                        </p>
+                      </motion.div>
+                      <motion.div
+                        className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-500/20"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.1 }}
+                      >
+                        <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-1">Recommendation</p>
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                          Block 2-4 PM for deep work — your most productive hours.
+                        </p>
+                      </motion.div>
+                    </div>
+                  </div>
+                )}
+              </ScrollArea>
+            )}
+          </>
+        )}
+      >
+        <ModuleLayout.Header title="Sync" icon={MODULE_ICONS.sync} subtitle={subtitle} actions={headerActions} />
+        <ModuleLayout.Content noPadding>
+          <div className="flex-1 overflow-auto h-full min-h-0 bg-[var(--glass-bg)] backdrop-blur-xl border border-[var(--glass-border)] min-w-0">
             {loading ? (
               <div className="h-full flex items-center justify-center">
-                <div className="text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-emerald-500 mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">Loading calendar...</p>
-                </div>
+                <UptradeSpinner size="lg" label="Loading calendar..." />
               </div>
             ) : error ? (
               <div className="h-full flex items-center justify-center">
@@ -1012,10 +1253,10 @@ export default function SyncModule({ className }) {
               </div>
             ) : viewMode === 'week' ? (
               // ===== WEEK VIEW =====
-              <div className="h-full flex flex-col">
+              <div className="h-full flex flex-col min-h-0">
                 {/* Day Headers */}
-                <div className="flex-shrink-0 flex border-b bg-muted/30 sticky top-0 z-10">
-                  <div className="w-[60px] flex-shrink-0 border-r" /> {/* Time column spacer */}
+                <div className="flex-shrink-0 flex border-b border-[var(--glass-border)] bg-[var(--glass-bg)]/90 backdrop-blur-md sticky top-0 z-10">
+                  <div className="w-[60px] flex-shrink-0 border-r border-[var(--glass-border)]" /> {/* Time column spacer */}
                   <div className="flex-1 grid grid-cols-7">
                     {weekDates.map((date, i) => {
                       const isCurrentDay = isSameDay(date, today)
@@ -1023,7 +1264,7 @@ export default function SyncModule({ className }) {
                         <div 
                           key={i}
                           className={cn(
-                            "text-center py-3 border-r last:border-r-0",
+                            "text-center py-3 border-r border-[var(--glass-border)] last:border-r-0",
                             isCurrentDay && "bg-emerald-50 dark:bg-emerald-500/5"
                           )}
                         >
@@ -1043,7 +1284,7 @@ export default function SyncModule({ className }) {
                 </div>
                 
                 {/* Time Grid */}
-                <div className="flex-1 flex flex-col relative">
+                <div className="flex-1 flex flex-col relative min-h-0">
                   {/* Current time indicator */}
                   {weekDates.some(d => isSameDay(d, today)) && (
                     <motion.div 
@@ -1057,9 +1298,9 @@ export default function SyncModule({ className }) {
                   )}
                   
                   {hours.map((hour) => (
-                    <div key={hour} className="flex flex-1 min-h-[40px] border-b last:border-b-0">
+                    <div key={hour} className="flex flex-1 min-h-[40px] border-b border-[var(--glass-border)] last:border-b-0">
                       {/* Time Label */}
-                      <div className="w-[60px] flex-shrink-0 text-[11px] text-muted-foreground text-right pr-3 pt-0.5 border-r">
+                      <div className="w-[60px] flex-shrink-0 text-[11px] text-muted-foreground text-right pr-3 pt-0.5 border-r border-[var(--glass-border)]">
                         {formatHour(hour)}
                       </div>
                       
@@ -1077,9 +1318,9 @@ export default function SyncModule({ className }) {
                             key={dayIndex}
                             onClick={() => handleGridClick(date, hour)}
                             className={cn(
-                              "border-r last:border-r-0 relative group cursor-pointer transition-colors",
+                              "border-r border-[var(--glass-border)] last:border-r-0 relative group cursor-pointer transition-colors",
                               isCurrentDay && "bg-emerald-50/50 dark:bg-emerald-500/5",
-                              "hover:bg-muted/50"
+                              "hover:bg-muted/30"
                             )}
                           >
                             {/* Events - using percentage-based positioning */}
@@ -1137,7 +1378,7 @@ export default function SyncModule({ className }) {
               </div>
             ) : (
               // ===== DAY VIEW =====
-              <div className="h-full flex flex-col">
+              <div className="h-full flex flex-col min-h-0">
                 {hours.map((hour) => {
                   const hourEvents = events.filter(e => 
                     isSameDay(e.startTime, selectedDate) && 
@@ -1145,12 +1386,12 @@ export default function SyncModule({ className }) {
                   )
                   
                   return (
-                    <div key={hour} className="flex flex-1 min-h-[40px] border-b">
-                      <div className="w-20 flex-shrink-0 text-xs text-muted-foreground text-right pr-4 pt-1">
+                    <div key={hour} className="flex flex-1 min-h-[40px] border-b border-[var(--glass-border)]">
+                      <div className="w-20 flex-shrink-0 text-xs text-muted-foreground text-right pr-4 pt-1 border-r border-[var(--glass-border)]">
                         {formatHour(hour)}
                       </div>
                       <div 
-                        className="flex-1 relative border-l group hover:bg-muted/30 transition-colors cursor-pointer"
+                        className="flex-1 relative border-l border-[var(--glass-border)] group hover:bg-muted/30 transition-colors cursor-pointer"
                         onClick={() => handleGridClick(selectedDate, hour)}
                       >
                         {hourEvents.map((event, i) => {
@@ -1189,287 +1430,9 @@ export default function SyncModule({ className }) {
               </div>
             )}
           </div>
-          
-          {/* ===== RIGHT SIDEBAR ===== */}
-          <AnimatePresence>
-            {showRightSidebar && (
-              <motion.div
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 280, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                transition={{ duration: 0.15, ease: 'easeOut' }}
-                className="flex-shrink-0 border-l overflow-hidden bg-muted/20"
-              >
-                <ScrollArea className="h-full">
-                  {/* Mini Calendar */}
-                  <MiniCalendar 
-                    selectedDate={selectedDate} 
-                    setSelectedDate={setSelectedDate} 
-                    events={filteredEvents}
-                  />
-                  
-                  {/* Calendar Sources */}
-                  <div className="px-4 py-3 border-t">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sources</span>
-                    </div>
-                    <div className="space-y-3">
-                      {/* Global Sources */}
-                      <div className="space-y-2">
-                        {calendarSources.map(source => {
-                          const SourceIcon = source.icon
-                          return (
-                            <label key={source.id} className="flex items-center gap-2.5 cursor-pointer group">
-                              <Checkbox 
-                                checked={source.visible}
-                                onCheckedChange={(checked) => {
-                                  setCalendarSources(sources => sources.map(s => 
-                                    s.id === source.id ? { ...s, visible: checked } : s
-                                  ))
-                                }}
-                                className={cn(
-                                  "border-2 transition-colors",
-                                  source.color === 'rose' && "border-rose-500 data-[state=checked]:bg-rose-500 data-[state=checked]:border-rose-500",
-                                  source.color === 'teal' && "border-teal-500 data-[state=checked]:bg-teal-500 data-[state=checked]:border-teal-500"
-                                )}
-                              />
-                              <SourceIcon className="h-4 w-4 text-muted-foreground" />
-                              <span className="text-sm group-hover:text-foreground transition-colors">{source.name}</span>
-                            </label>
-                          )
-                        })}
-                      </div>
-
-                      {/* Project Sources */}
-                      {projectList.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                            Projects
-                          </p>
-                          <div className="space-y-2">
-                            {projectList.map((project) => {
-                              const isOpen = expandedProjects[project.id] ?? true
-                              return (
-                                <div key={project.id} className="rounded-md border bg-background/60">
-                                  <button
-                                    onClick={() =>
-                                      setExpandedProjects((prev) => ({
-                                        ...prev,
-                                        [project.id]: !isOpen,
-                                      }))
-                                    }
-                                    className="w-full flex items-center justify-between px-2.5 py-2 text-sm"
-                                  >
-                                    <span className="truncate">{project.name || project.title}</span>
-                                    <ChevronDown className={cn("h-4 w-4 transition-transform", !isOpen && "-rotate-90")} />
-                                  </button>
-                                  {isOpen && (
-                                    <div className="px-2.5 pb-2 space-y-2">
-                                      {crmSources.map((source) => {
-                                        const SourceIcon = source.icon
-                                        const checked = projectSourceVisibility?.[project.id]?.[source.id] ?? true
-                                        return (
-                                          <label key={source.id} className="flex items-center gap-2.5 cursor-pointer group">
-                                            <Checkbox
-                                              checked={checked}
-                                              onCheckedChange={(value) => {
-                                                setProjectSourceVisibility((prev) => ({
-                                                  ...prev,
-                                                  [project.id]: {
-                                                    ...prev[project.id],
-                                                    [source.id]: !!value,
-                                                  },
-                                                }))
-                                              }}
-                                              className={cn(
-                                                "border-2 transition-colors",
-                                                source.color === 'amber' && "border-amber-500 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500",
-                                                source.color === 'violet' && "border-violet-500 data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
-                                              )}
-                                            />
-                                            <SourceIcon className="h-4 w-4 text-muted-foreground" />
-                                            <span className="text-sm group-hover:text-foreground transition-colors">
-                                              {source.name}
-                                            </span>
-                                          </label>
-                                        )
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Accounts */}
-                  <div className="px-4 py-3 border-t">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Accounts</p>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                            onClick={() => {
-                              // Find host for current user, or use first host
-                              const userHost = hosts.find(h => h.email === user?.email) || hosts[0]
-                              if (userHost) {
-                                setShowCalendarConnections(userHost)
-                              } else {
-                                toast.info('Create a host first to connect calendars', {
-                                  action: {
-                                    label: 'Manage Hosts',
-                                    onClick: () => setShowHostsPanel(true)
-                                  }
-                                })
-                              }
-                            }}
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Connect calendar</TooltipContent>
-                      </Tooltip>
-                    </div>
-                    <div className="space-y-2">
-                      {hosts.length === 0 ? (
-                        <button
-                          onClick={() => setShowHostsPanel(true)}
-                          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <Plus className="h-4 w-4" />
-                          Add a host to connect calendars
-                        </button>
-                      ) : (
-                        hosts.map((host) => (
-                          <div key={host.id} className="space-y-1.5">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-sm">
-                                <span className="text-white text-xs font-semibold">
-                                  {host.name?.[0]?.toUpperCase() || host.email?.[0]?.toUpperCase() || 'U'}
-                                </span>
-                              </div>
-                              <span className="text-sm truncate flex-1">{host.email || host.name}</span>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                                    onClick={() => setShowCalendarConnections(host)}
-                                  >
-                                    <Link2 className="h-3.5 w-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Manage calendars</TooltipContent>
-                              </Tooltip>
-                            </div>
-                            {/* Show connected calendars if any */}
-                            {host.connected_calendars?.length > 0 && (
-                              <div className="ml-9 space-y-1">
-                                {host.connected_calendars.map((cal) => (
-                                  <div key={cal.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-                                    <div className={cn(
-                                      "w-2 h-2 rounded-full",
-                                      cal.provider === 'google' && "bg-red-500",
-                                      cal.provider === 'outlook' && "bg-blue-500",
-                                      cal.provider === 'apple' && "bg-gray-500"
-                                    )} />
-                                    <span className="truncate">{cal.name || cal.calendar_id}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Today's Agenda */}
-                  <div className="px-4 py-3 border-t">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Agenda
-                      </span>
-                      <Badge variant="secondary" className="text-[10px] h-5">
-                        {isSameDay(selectedDate, today) ? 'Today' : selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </Badge>
-                    </div>
-                    <div className="space-y-2">
-                      {getEventsForDay(selectedDate).length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-6">
-                          No events scheduled
-                        </p>
-                      ) : (
-                        getEventsForDay(selectedDate).slice(0, 6).map((event, i) => {
-                          const colors = EVENT_COLORS[event.color] || EVENT_COLORS.default
-                          return (
-                            <motion.div 
-                              key={event.id || i} 
-                              className="flex items-start gap-2.5 p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
-                              whileHover={{ x: 2 }}
-                            >
-                              <div 
-                                className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" 
-                                style={{ backgroundColor: colors.accent }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">{event.title}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {formatTime(event.startTime)} – {formatTime(event.endTime)}
-                                </div>
-                              </div>
-                            </motion.div>
-                          )
-                        })
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Signal AI Insights */}
-                  {signalEnabled && (
-                    <div className="px-4 py-3 border-t">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
-                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">AI Insights</span>
-                      </div>
-                      <div className="space-y-2">
-                        <motion.div 
-                          className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-500/20"
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                        >
-                          <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300 mb-1">📊 Schedule Analysis</p>
-                          <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
-                            You have 2.5 hours of focus time available this afternoon.
-                          </p>
-                        </motion.div>
-                        <motion.div 
-                          className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-500/20"
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.1 }}
-                        >
-                          <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-1">⚡ Recommendation</p>
-                          <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                            Block 2-4 PM for deep work — your most productive hours.
-                          </p>
-                        </motion.div>
-                      </div>
-                    </div>
-                  )}
-                </ScrollArea>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-        
+        </ModuleLayout.Content>
+      </ModuleLayout>
+      
         {/* ===== MODALS ===== */}
         <CreateEventModal
           isOpen={showCreateModal}
@@ -1477,6 +1440,14 @@ export default function SyncModule({ className }) {
           initialType={createModalType}
           selectedDate={selectedDate}
           onCreated={loadCalendarData}
+        />
+        
+        <PlanDayDialog
+          open={showPlanDay}
+          onOpenChange={setShowPlanDay}
+          projectId={currentProject?.id}
+          initialDate={selectedDate}
+          onPlanComplete={loadCalendarData}
         />
         
         <BookingTypesPanel
@@ -1609,7 +1580,7 @@ export default function SyncModule({ className }) {
               </div>
             ) : (
               <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                <UptradeSpinner size="lg" className="[&_svg]:text-muted-foreground" />
               </div>
             )}
           </DialogContent>
@@ -1648,17 +1619,12 @@ export default function SyncModule({ className }) {
                       </div>
                       <Button 
                         size="sm"
+                        loading={aiLoading === 'blocking'}
                         onClick={() => handleBlockFocusTime(slot)}
                         disabled={aiLoading === 'blocking'}
                       >
-                        {aiLoading === 'blocking' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <>
-                            <Plus className="h-4 w-4 mr-1" />
-                            Block
-                          </>
-                        )}
+                        <Plus className="h-4 w-4 mr-1" />
+                        Block
                       </Button>
                     </div>
                   ))
@@ -1681,7 +1647,7 @@ export default function SyncModule({ className }) {
               </div>
             ) : (
               <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                <UptradeSpinner size="lg" className="[&_svg]:text-muted-foreground" />
               </div>
             )}
           </DialogContent>
@@ -1729,7 +1695,7 @@ export default function SyncModule({ className }) {
                     <div className="space-y-2">
                       {(Array.isArray(meetingPrep.agenda) ? meetingPrep.agenda : [meetingPrep.agenda]).map((item, i) => (
                         <div key={i} className="p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-start gap-3">
-                          <span className="text-xs font-medium text-gray-400 mt-0.5">{i + 1}.</span>
+                          <span className="text-xs font-medium text-muted-foreground mt-0.5">{i + 1}.</span>
                           <p className="text-sm text-gray-700">{typeof item === 'string' ? item : item.topic || item.title}</p>
                         </div>
                       ))}
@@ -1786,12 +1752,11 @@ export default function SyncModule({ className }) {
               </div>
             ) : (
               <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                <UptradeSpinner size="lg" className="[&_svg]:text-muted-foreground" />
               </div>
             )}
           </DialogContent>
         </Dialog>
-      </div>
     </TooltipProvider>
   )
 }

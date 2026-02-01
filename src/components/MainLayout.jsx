@@ -1,65 +1,66 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
 import { useSearchParams, useLocation, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import Sidebar from './Sidebar'
 import TopHeader from './TopHeader'
 import GlobalCommandPalette from './GlobalCommandPalette'
-import UptradeLoading from './UptradeLoading'
+import UptradeLoading, { UptradeSpinner } from './UptradeLoading'
+import { ModuleErrorBoundary } from './ModuleErrorBoundary'
 import useAuthStore from '@/lib/auth-store'
-import useMessagesStore from '@/lib/messages-store'
+import { MessagesProvider } from '@/lib/MessagesProvider'
 import usePageContextStore from '@/lib/page-context-store'
 import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 // Lazy load all section components for better code splitting
-const Dashboard = lazy(() => import('./Dashboard'))
-const RepDashboard = lazy(() => import('./RepDashboard'))
-const TeamMetrics = lazy(() => import('./TeamMetrics'))
-// Analytics Module - new sidebar-based layout with per-page views
-const AnalyticsModuleWrapper = lazy(() => import('./analytics/AnalyticsModuleWrapper'))
-const Proposals = lazy(() => import('./Proposals'))
-const FilesDrive = lazy(() => import('./FilesDrive'))
-const Messages = lazy(() => import('./Messages'))
-const Billing = lazy(() => import('./Billing'))
-// CRM Dashboard - unified for all org types (isAgency layer handles capability filtering)
-const CRMDashboard = lazy(() => import('./crm/CRMDashboard'))
-const TeamTab = lazy(() => import('./crm/TeamTab'))
-const TeamModule = lazy(() => import('./team/TeamModule'))
-const Outreach = lazy(() => import('@/pages/Outreach'))
-const BlogDashboard = lazy(() => import('@/pages/blog/BlogDashboard'))
-const PortfolioManagement = lazy(() => import('./PortfolioManagement'))
-const Audits = lazy(() => import('@/pages/Audits'))
-const ProposalEditor = lazy(() => import('./ProposalEditor'))
-import ChatBubbleManager from './ChatBubbleManager'
-const FormsManager = lazy(() => import('./forms/FormsManager'))
-const TenantSales = lazy(() => import('./tenant/TenantSales'))
-// Sales Prospecting Module
-const SalesDashboard = lazy(() => import('./sales/SalesDashboard'))
-// SEO Module - Motion-inspired layout
-const SEOModule = lazy(() => import('../pages/seo/SEOModule'))
-// Ecommerce Module (legacy)
-const EcommerceModuleWrapper = lazy(() => import('./ecommerce/EcommerceModuleWrapper'))
-// Commerce Module (unified products, services, classes, events, sales)
-const CommerceModuleWrapper = lazy(() => import('./commerce/CommerceModuleWrapper'))
-// Engage Module
-const EngageModuleDashboard = lazy(() => import('./engage/EngageModuleDashboard'))
-// Reputation Module
-const ReputationModuleDashboard = lazy(() => import('./reputation/ReputationModuleDashboard'))
-// Broadcast Module
-const BroadcastModuleDashboard = lazy(() => import('./broadcast/BroadcastModuleDashboard'))
-// Affiliates Module - affiliate tracking
+const DashboardModule = lazy(() => import('./dashboard/DashboardModule'))
+const RepDashboardModule = lazy(() => import('./dashboard/RepDashboardModule'))
+const AnalyticsModule = lazy(() => import('./analytics/AnalyticsModule'))
+const ProposalsModule = lazy(() => import('./proposals/ProposalsModule'))
+const FilesModule = lazy(() => import('./files/FilesModule'))
+const MessagesModule = lazy(() => import('./messages/MessagesModuleV2'))
+const BillingModule = lazy(() => import('./billing/BillingModule'))
+const CRMModule = lazy(() => import('./crm/CRMModule'))
+const OutreachModule = lazy(() => import('./outreach/OutreachModule'))
+const BlogModule = lazy(() => import('./blog/BlogModule'))
+const PortfolioModule = lazy(() => import('./portfolio/PortfolioModule'))
+const AuditsModule = lazy(() => import('./audits/AuditsModule'))
+const ProposalEditorModule = lazy(() => import('./proposals/ProposalEditorModule'))
+import MessagesWidget from './MessagesWidget'
+const FormsModule = lazy(() => import('./forms/FormsModule'))
+const SEOModule = lazy(() => import('./seo/SEOModule'))
+// Commerce: wrap lazy import so chunk load failures show a fallback with retry
+function CommerceLoadError({ onRetry }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-6 text-center">
+      <p className="text-[var(--text-primary)] font-medium mb-1">Commerce failed to load</p>
+      <p className="text-sm text-[var(--text-secondary)] mb-4">Check the console for details, or try again.</p>
+      <Button variant="outline" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  )
+}
+const CommerceModule = lazy(() =>
+  import('./commerce/CommerceModule').catch((err) => {
+    console.error('[Commerce] Failed to load module:', err)
+    return {
+      default: function CommerceModuleFallback() {
+        return <CommerceLoadError onRetry={() => window.location.reload()} />
+      },
+    }
+  })
+)
+const EngageModule = lazy(() => import('./engage/EngageModule'))
+const ReputationModule = lazy(() => import('./reputation/ReputationModule'))
+const BroadcastModule = lazy(() => import('./broadcast/BroadcastModule'))
 const AffiliatesModule = lazy(() => import('./affiliates/AffiliatesModule'))
-// Sync Module - calendar and scheduling
-const SyncModuleDashboard = lazy(() => import('./sync/SyncModule'))
-// Signal Module (v2)
+const SyncModule = lazy(() => import('./sync/SyncModule'))
 const SignalModule = lazy(() => import('./signal/SignalModule'))
-// Customers Module - post-sale customer management
-const CustomersModuleWrapper = lazy(() => import('./customers/CustomersModuleWrapper'))
-// Projects V2 Module - Three-view system
-const ProjectsV2 = lazy(() => import('./projects/ProjectsV2'))
-const Settings = lazy(() => import('./Settings'))
-// Organization Settings - for org-level client users
-const OrgSettings = lazy(() => import('@/pages/OrgSettings'))
+const ProjectsModule = lazy(() => import('./projects/ProjectsModule'))
+const WebsiteModule = lazy(() => import('./website/WebsiteModule'))
+const SettingsModule = lazy(() => import('./settings/SettingsModule'))
+const OrgSettingsModule = lazy(() => import('./settings/OrgSettingsModule'))
 // Tenants management moved to Projects.jsx
 
 const MainLayout = () => {
@@ -82,9 +83,6 @@ const MainLayout = () => {
   const [sidebarMode, setSidebarMode] = useState('hover')
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const { user, isLoading } = useAuthStore()
-  
-  // Get messaging methods for global initialization
-  const { prefetchAll, subscribeToMessages, unsubscribeFromMessages, realtimeConnected } = useMessagesStore()
 
   // Sync activeSection with URL path for sidebar highlighting
   useEffect(() => {
@@ -97,7 +95,6 @@ const MainLayout = () => {
   // Handle sidebar section change - navigates to the route
   const handleSectionChange = (section) => {
     setActiveSection(section)
-    // Navigate to the section's base route
     navigate(`/${section === 'dashboard' ? '' : section}`)
   }
 
@@ -115,8 +112,8 @@ const MainLayout = () => {
         'analytics': 'analytics',
         'seo': 'seo',
         'engage': 'engage',
-        'outreach': 'email',
-        'email': 'email',
+        'outreach': 'outreach',
+        'email': 'outreach',
         'messages': 'messages',
         'proposals': 'proposals',
         'billing': 'billing',
@@ -124,7 +121,6 @@ const MainLayout = () => {
         'prospects': 'crm',
         'crm': 'crm',
         'team': 'team',
-        'sales': 'sales',
         'settings': 'settings',
         'files': 'files',
         'blog': 'content',
@@ -137,27 +133,14 @@ const MainLayout = () => {
         'forms': 'forms',
         'sync': 'sync',
         'projects': 'projects',
+        'website': 'website',
       }
       const module = moduleMap[activeSection] || activeSection
       usePageContextStore.getState().setModule(module)
     }
   }, [activeSection])
 
-  // Initialize messaging system on app mount
-  useEffect(() => {
-    if (!user?.id || !user?.org_id || isLoading) return
-    
-    console.log('[MainLayout] Initializing messaging system for user:', user.email)
-    prefetchAll()
-    
-    if (!realtimeConnected) {
-      subscribeToMessages(user.id, user.org_id, user.name || 'User')
-    }
-    
-    return () => {
-      unsubscribeFromMessages()
-    }
-  }, [user?.id, user?.org_id, isLoading])
+  // Messaging: MessagesProvider (below) handles socket connect/disconnect and query invalidation
 
   // Navigation function for child components
   const navigateTo = (section, data = null) => {
@@ -166,10 +149,7 @@ const MainLayout = () => {
 
   // Check if user is a sales rep
   const isSalesRep = user?.teamRole === 'sales_rep'
-  
-  // Modules that use full height (have their own sidebars/scrolling)
-  const fullHeightModules = ['broadcast', 'affiliates', 'commerce', 'seo', 'crm', 'sync', 'analytics', 'projects', 'engage', 'reputation', 'customers', 'signal', 'forms', 'team', 'messages', 'files']
-  const isFullHeight = fullHeightModules.includes(activeSection)
+  const reducedMotion = useReducedMotion()
 
   if (isLoading) {
     return (
@@ -180,21 +160,50 @@ const MainLayout = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <MessagesProvider>
+    <div className="flex flex-col h-screen relative">
+      {/* Skip to main content - for keyboard users */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Skip to main content
+      </a>
+      {/* Portal background: custom image (if set) or default background.avif + theme-aware overlay (80% light / 80% dark) */}
+      {user?.background_image_url ? (
+        <>
+          <div
+            className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: `url(${user.background_image_url})` }}
+          />
+          <div className="fixed inset-0 z-0 bg-white/80 dark:bg-black/80" />
+        </>
+      ) : (
+        <>
+          <div
+            className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: 'url(/background.avif)' }}
+          />
+          <div className="fixed inset-0 z-0 bg-white/80 dark:bg-black/80" />
+        </>
+      )}
+      
       {/* Top Header - Always persistent */}
       <TopHeader 
         onNavigate={navigateTo}
         onOpenSearch={() => setCommandPaletteOpen(true)}
+        className="relative z-10"
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative z-10">
         {/* Mobile Sidebar Toggle */}
         <div className="lg:hidden fixed top-14 left-4 z-50">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-            className="shadow-md bg-card"
+            className="shadow-md bg-card min-h-[44px] min-w-[44px]"
+            aria-label={isMobileSidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
           >
             {isMobileSidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
@@ -203,7 +212,7 @@ const MainLayout = () => {
         {/* Desktop Sidebar - Always persistent */}
         <div className="hidden lg:block relative">
           <div className="h-full flex-shrink-0 transition-all duration-150" style={{ width: sidebarWidth }} />
-          <aside className="absolute inset-y-0 left-0 z-20">
+          <aside className="absolute inset-y-0 left-0 z-20" role="navigation" aria-label="Main navigation">
             <Sidebar
               activeSection={activeSection}
               onSectionChange={handleSectionChange}
@@ -221,7 +230,7 @@ const MainLayout = () => {
               className="lg:hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
               onClick={() => setIsMobileSidebarOpen(false)}
             />
-            <aside className="lg:hidden fixed inset-y-0 left-0 w-64 bg-card border-r border-border/50 shadow-xl z-[101] overflow-y-auto">
+            <aside className="lg:hidden fixed inset-y-0 left-0 w-64 bg-card border-r border-border/50 shadow-xl z-[101] overflow-y-auto" role="navigation" aria-label="Main navigation">
               <Sidebar
                 activeSection={activeSection}
                 onSectionChange={(section) => {
@@ -235,93 +244,90 @@ const MainLayout = () => {
         )}
 
         {/* Main Content - Uses React Router for nested routes */}
-        <main className={`flex-1 min-w-0 ${isFullHeight ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <Suspense fallback={
-            <div className="flex items-center justify-center h-full">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-            </div>
-          }>
-            <div className={isFullHeight ? 'h-full w-full' : 'p-6 lg:p-8'}>
-              <Routes>
+        <main id="main-content" className="flex-1 min-w-0 overflow-hidden flex flex-col min-h-0" role="main" aria-label="Page content">
+          <div className="flex-1 min-h-0 flex flex-col">
+            <Suspense fallback={
+              <div className="flex items-center justify-center h-full">
+                <UptradeSpinner size="lg" />
+              </div>
+            }>
+              <ModuleErrorBoundary>
+                <div className="flex-1 min-h-0 flex flex-col h-full">
+                  <Routes>
                 {/* Dashboard */}
-                <Route index element={isSalesRep ? <RepDashboard onNavigate={navigateTo} /> : <Dashboard onNavigate={navigateTo} />} />
-                <Route path="dashboard" element={isSalesRep ? <RepDashboard onNavigate={navigateTo} /> : <Dashboard onNavigate={navigateTo} />} />
+                <Route index element={isSalesRep ? <RepDashboardModule onNavigate={navigateTo} /> : <DashboardModule onNavigate={navigateTo} />} />
+                <Route path="dashboard" element={isSalesRep ? <RepDashboardModule onNavigate={navigateTo} /> : <DashboardModule onNavigate={navigateTo} />} />
                 
                 {/* SEO Module - supports nested routes like /seo/dashboard, /seo/keywords, etc */}
                 <Route path="seo/*" element={<SEOModule />} />
                 
                 {/* Analytics Module */}
-                <Route path="analytics/*" element={<AnalyticsModuleWrapper onNavigate={navigateTo} />} />
+                <Route path="analytics/*" element={<AnalyticsModule onNavigate={navigateTo} />} />
                 
                 {/* Projects */}
-                <Route path="projects/*" element={<ProjectsV2 onNavigate={navigateTo} />} />
+                <Route path="projects/*" element={<ProjectsModule onNavigate={navigateTo} />} />
+                
+                {/* Website - page-centric content management */}
+                <Route path="website/*" element={<WebsiteModule />} />
                 
                 {/* CRM - all variations route to same component */}
-                <Route path="crm/*" element={<CRMDashboard />} />
-                <Route path="clients/*" element={<CRMDashboard />} />
-                <Route path="prospects/*" element={<CRMDashboard />} />
+                <Route path="crm/*" element={<CRMModule />} />
+                <Route path="clients/*" element={<CRMModule />} />
+                <Route path="prospects/*" element={<CRMModule />} />
                 
                 {/* Commerce Module */}
-                <Route path="commerce/*" element={<CommerceModuleWrapper onNavigate={navigateTo} />} />
-                <Route path="ecommerce/*" element={<EcommerceModuleWrapper onNavigate={navigateTo} />} />
+                <Route path="commerce/*" element={<CommerceModule onNavigate={navigateTo} />} />
                 
                 {/* Engage Module */}
-                <Route path="engage/*" element={<EngageModuleDashboard onNavigate={navigateTo} />} />
+                <Route path="engage/*" element={<EngageModule onNavigate={navigateTo} />} />
                 
                 {/* Sync Module */}
-                <Route path="sync/*" element={<SyncModuleDashboard onNavigate={navigateTo} />} />
+                <Route path="sync/*" element={<SyncModule onNavigate={navigateTo} />} />
                 
                 {/* Signal AI */}
                 <Route path="signal/*" element={<SignalModule onNavigate={navigateTo} />} />
                 
                 {/* Reputation */}
-                <Route path="reputation/*" element={<ReputationModuleDashboard onNavigate={navigateTo} />} />
+                <Route path="reputation/*" element={<ReputationModule onNavigate={navigateTo} />} />
                 
                 {/* Broadcast */}
-                <Route path="broadcast/*" element={<BroadcastModuleDashboard onNavigate={navigateTo} />} />
+                <Route path="broadcast/*" element={<BroadcastModule onNavigate={navigateTo} />} />
                 
                 {/* Affiliates */}
                 <Route path="affiliates/*" element={<AffiliatesModule onNavigate={navigateTo} />} />
                 
-                {/* Customers */}
-                <Route path="customers/*" element={<CustomersModuleWrapper onNavigate={navigateTo} />} />
-                
-                {/* Team */}
-                <Route path="team/*" element={<TeamModule />} />
-                <Route path="users/*" element={<TeamModule />} />
-                <Route path="team-metrics" element={<TeamMetrics />} />
-                
                 {/* Forms */}
-                <Route path="forms/*" element={<FormsManager />} />
+                <Route path="forms/*" element={<FormsModule />} />
                 
                 {/* Simple pages */}
-                <Route path="audits" element={<Audits />} />
-                <Route path="proposals" element={<Proposals onNavigate={navigateTo} />} />
-                <Route path="files/*" element={<FilesDrive />} />
-                <Route path="messages/*" element={<Messages />} />
-                <Route path="billing" element={<Billing />} />
-                <Route path="email/*" element={<Outreach />} />
-                <Route path="blog" element={<BlogDashboard />} />
-                <Route path="portfolio" element={<PortfolioManagement />} />
-                <Route path="my-sales" element={<TenantSales />} />
-                <Route path="sales/*" element={<SalesDashboard />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="organization" element={<OrgSettings />} />
+                <Route path="audits/*" element={<AuditsModule />} />
+                <Route path="proposals" element={<ProposalsModule onNavigate={navigateTo} />} />
+                <Route path="files/*" element={<FilesModule />} />
+                <Route path="messages/*" element={<MessagesModule />} />
+                <Route path="billing" element={<BillingModule />} />
+                <Route path="outreach/*" element={<OutreachModule />} />
+                <Route path="email/*" element={<Navigate to="/outreach" replace />} />
+                <Route path="blog" element={<BlogModule />} />
+                <Route path="portfolio" element={<PortfolioModule />} />
+                <Route path="settings" element={<SettingsModule />} />
+                <Route path="organization" element={<OrgSettingsModule />} />
                 
                 {/* Proposal Editor (special case) */}
-                <Route path="proposal-editor/:proposalId?" element={<ProposalEditor onBack={() => navigateTo('proposals')} />} />
+                <Route path="proposal-editor/:proposalId?" element={<ProposalEditorModule onBack={() => navigateTo('proposals')} />} />
                 
                 {/* Catch-all - redirect to dashboard instead of rendering it */}
                 <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </div>
-          </Suspense>
+                  </Routes>
+                </div>
+              </ModuleErrorBoundary>
+            </Suspense>
+          </div>
         </main>
       </div>
 
       {/* Floating Chat Bubble */}
       <Suspense fallback={null}>
-        <ChatBubbleManager hidden={activeSection === 'messages'} />
+        <MessagesWidget hidden={activeSection === 'messages'} />
       </Suspense>
 
       {/* Global Command Palette */}
@@ -331,6 +337,7 @@ const MainLayout = () => {
         onNavigate={navigateTo}
       />
     </div>
+    </MessagesProvider>
   )
 }
 

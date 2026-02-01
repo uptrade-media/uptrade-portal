@@ -60,7 +60,7 @@ import {
   UPTRADE_TASK_STATUS_CONFIG,
   UPTRADE_TASK_PRIORITY_CONFIG,
   UPTRADE_TASK_MODULE_CONFIG,
-} from '@/lib/projects-v2-store'
+} from '@/lib/hooks'
 
 // Module icon mapping (matches Sidebar.jsx)
 const MODULE_ICONS = {

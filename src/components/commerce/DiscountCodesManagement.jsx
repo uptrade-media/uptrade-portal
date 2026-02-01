@@ -1,17 +1,12 @@
 // src/components/commerce/DiscountCodesManagement.jsx
 // Manage discount codes for Commerce
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect } from 'react'
 import useAuthStore from '@/lib/auth-store'
-import {
-  getDiscountCodes,
-  createDiscountCode,
-  updateDiscountCode,
-  deleteDiscountCode,
-  getDiscountUsage,
-  getOfferings,
-  getCategories,
-} from '@/lib/commerce-store'
+import { useCommerceOfferings, useCommerceCategories, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
+import { commerceApi } from '@/lib/portal-api' // For discount code API calls
 import {
   Dialog,
   DialogContent,
@@ -58,7 +53,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Loader2,
   Search,
   Percent,
   DollarSign,
@@ -71,6 +65,9 @@ import {
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { format, parseISO, isAfter, isBefore } from 'date-fns'
+import { EmptyState } from '@/components/EmptyState'
+import { UptradeSpinner } from '@/components/UptradeLoading'
+import { TableSkeleton } from '@/components/skeletons'
 
 const DISCOUNT_TYPES = [
   { value: 'percentage', label: 'Percentage Off', icon: Percent },
@@ -372,22 +369,23 @@ export default function DiscountCodesManagement({ open, onOpenChange }) {
 
           {/* Codes List */}
           {loading ? (
-            <div className="py-12 text-center">
-              <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+            <div className="border rounded-lg overflow-hidden">
+              <TableSkeleton rows={5} cols={5} />
             </div>
           ) : filteredCodes.length === 0 ? (
             <Card>
-              <CardContent className="py-12 text-center">
-                <Tag className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
-                <p className="text-muted-foreground">
-                  {discountCodes.length === 0
-                    ? 'No discount codes yet'
-                    : 'No codes match your search'}
-                </p>
-                <Button variant="outline" className="mt-4" onClick={handleCreate}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Your First Code
-                </Button>
+              <CardContent className="pt-6">
+                <EmptyState
+                  icon={Tag}
+                  title={discountCodes.length === 0 ? 'No discount codes yet' : 'No codes match your search'}
+                  description={
+                    discountCodes.length === 0
+                      ? 'Create a discount code to offer promotions to customers.'
+                      : 'Try adjusting your search.'
+                  }
+                  actionLabel={discountCodes.length === 0 ? 'Create Your First Code' : undefined}
+                  onAction={discountCodes.length === 0 ? handleCreate : undefined}
+                />
               </CardContent>
             </Card>
           ) : (
@@ -679,7 +677,7 @@ export default function DiscountCodesManagement({ open, onOpenChange }) {
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {saving && <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />}
               {selectedCode ? 'Save Changes' : 'Create Code'}
             </Button>
           </DialogFooter>
@@ -718,7 +716,7 @@ export default function DiscountCodesManagement({ open, onOpenChange }) {
 
           {usageLoading ? (
             <div className="py-8 text-center">
-              <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+              <UptradeSpinner size="md" className="[&_p]:hidden mx-auto" />
             </div>
           ) : usage.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">

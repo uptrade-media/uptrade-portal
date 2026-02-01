@@ -85,6 +85,27 @@ const MIME_TYPES: Record<string, string> = {
   '.avif': 'image/avif',
 }
 
+/** Derive URL page path from source file path (Next.js App Router, Pages, or fallback). */
+function filePathToPagePath(filePath: string): string {
+  let p = filePath
+  // Next.js App Router: app/page.jsx → /, app/about/page.jsx → /about
+  if (p.startsWith('app/') || p.startsWith('src/app/')) {
+    p = p.replace(/^app\//, '').replace(/^src\/app\//, '')
+    p = p.replace(/\/page\.(tsx?|jsx?)$/, '').replace(/\/layout\.(tsx?|jsx?)$/, '')
+    p = p.replace(/\[([^\]]+)\]/g, ':$1')
+    return p === '' ? '/' : '/' + p.replace(/\\/g, '/')
+  }
+  // Next.js Pages: pages/index.jsx → /, pages/about.jsx → /about
+  if (p.startsWith('pages/') || p.startsWith('src/pages/')) {
+    p = p.replace(/^pages\//, '').replace(/^src\/pages\//, '')
+    const base = path.basename(p, path.extname(p))
+    return base === 'index' ? '/' : '/' + base
+  }
+  // Fallback: strip extension, leading slash
+  p = p.replace(/\.[^.]+$/, '').replace(/^\.\//, '').replace(/\\/g, '/')
+  return p === '' || p === 'index' ? '/' : '/' + p
+}
+
 // ============================================
 // Main Command Handler
 // ============================================
@@ -424,18 +445,23 @@ async function migrateImages(options: ImagesOptions) {
     return
   }
 
-  // Step 1: Create slot assignments in Portal
+  // Step 1: Create slot assignments in Portal (one per slot + page path so managed images show which page)
   console.log(chalk.bold('  Step 1: Creating slot assignments in Portal...'))
-  const uniqueSlots = new Map<string, UploadedImage>()
+  const uniqueSlotPages = new Map<string, { fileId: string }>() // key: `${slotId}\0${page_path}`
   for (const m of migrations) {
     if (m.uploaded.slotId && m.uploaded.fileId) {
-      uniqueSlots.set(m.uploaded.slotId, m.uploaded)
+      const pagePath = filePathToPagePath(m.usage.filePath)
+      const key = `${m.uploaded.slotId}\0${pagePath}`
+      if (!uniqueSlotPages.has(key)) {
+        uniqueSlotPages.set(key, { fileId: m.uploaded.fileId })
+      }
     }
   }
 
   let slotsCreated = 0
   let slotsFailed = 0
-  for (const [slotId, uploaded] of uniqueSlots) {
+  for (const [key, { fileId }] of uniqueSlotPages) {
+    const [slotId, pagePath] = key.split('\0')
     try {
       const response = await fetch(`${apiUrl}/public/images/slot/${encodeURIComponent(slotId)}`, {
         method: 'POST',
@@ -444,22 +470,23 @@ async function migrateImages(options: ImagesOptions) {
           'X-API-Key': apiKey.trim(),
         },
         body: JSON.stringify({
-          file_id: uploaded.fileId,
+          file_id: fileId,
+          page_path: pagePath || undefined,
         }),
       })
       if (!response.ok) {
         const text = await response.text()
-        console.log(chalk.yellow(`    ⚠ Slot ${slotId}: ${response.status} - ${text}`))
+        console.log(chalk.yellow(`    ⚠ Slot ${slotId} @ ${pagePath}: ${response.status} - ${text}`))
         slotsFailed++
       } else {
         slotsCreated++
       }
     } catch (error: any) {
-      console.log(chalk.yellow(`    ⚠ Slot ${slotId}: ${error.message}`))
+      console.log(chalk.yellow(`    ⚠ Slot ${slotId} @ ${pagePath}: ${error.message}`))
       slotsFailed++
     }
   }
-  console.log(`    Created ${chalk.green(slotsCreated)} slots${slotsFailed > 0 ? `, ${chalk.yellow(slotsFailed)} failed` : ''}`)
+  console.log(`    Created ${chalk.green(slotsCreated)} slot assignments${slotsFailed > 0 ? `, ${chalk.yellow(slotsFailed)} failed` : ''}`)
   console.log('')
 
   // Step 2: Update code references
@@ -616,33 +643,44 @@ async function uploadAndMigrate(options: ImagesOptions) {
     return
   }
 
-  // Step 3: Create slots
+  // Step 3: Create slots (one per slot + page path so managed images show which page)
   console.log(chalk.bold('  Step 3: Creating image slots in Portal...'))
   
   let slotsCreated = 0
   for (const img of uploaded) {
     if (!img.slotId || !img.fileId) continue
-    
-    try {
-      const response = await fetch(`${apiUrl}/public/images/slot/${encodeURIComponent(img.slotId)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey.trim(),
-        },
-        body: JSON.stringify({ file_id: img.fileId }),
-      })
-      if (response.ok) {
-        slotsCreated++
-      } else {
-        console.log(chalk.yellow(`    ⚠ Slot ${img.slotId}: ${response.status}`))
+    const migratableImg = migratable.find(
+      m => img.localPath === m.filePath || img.localPath.endsWith(m.filename)
+    )
+    const pagePaths = migratableImg
+      ? [...new Set(migratableImg.usedIn.filter(u => u.canAutoMigrate).map(u => filePathToPagePath(u.filePath)))]
+      : ['/']
+    if (pagePaths.length === 0) pagePaths.push('/')
+    for (const pagePath of pagePaths) {
+      try {
+        const response = await fetch(`${apiUrl}/public/images/slot/${encodeURIComponent(img.slotId)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey.trim(),
+          },
+          body: JSON.stringify({
+            file_id: img.fileId,
+            page_path: pagePath === '/' ? '/' : pagePath,
+          }),
+        })
+        if (response.ok) {
+          slotsCreated++
+        } else {
+          console.log(chalk.yellow(`    ⚠ Slot ${img.slotId} @ ${pagePath}: ${response.status}`))
+        }
+      } catch (error: any) {
+        console.log(chalk.yellow(`    ⚠ Slot ${img.slotId} @ ${pagePath}: ${error.message}`))
       }
-    } catch (error: any) {
-      console.log(chalk.yellow(`    ⚠ Slot ${img.slotId}: ${error.message}`))
     }
   }
   
-  console.log(`  Created: ${chalk.green(slotsCreated)} slots`)
+  console.log(`  Created: ${chalk.green(slotsCreated)} slot assignments`)
   console.log('')
 
   // Step 4: Update code
@@ -1353,30 +1391,37 @@ async function uploadImageToPortal(
 
   const result = await response.json() as { file: { id: string; public_url: string }; image?: any }
 
-  // Create slot in site_managed_images so it appears in Portal
+  // Create slot(s) in site_managed_images so they appear in Portal with page path
   const slotId = image.suggestedSlotId
-  try {
-    const slotResponse = await fetch(
-      `${config.apiUrl}/public/images/slot/${encodeURIComponent(slotId)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': config.apiKey.trim(),
-        },
-        body: JSON.stringify({
-          file_id: result.file.id,
-          alt_text: image.filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '),
-        }),
+  const altText = image.filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
+  const pagePaths =
+    image.usedIn.length > 0
+      ? [...new Set(image.usedIn.filter(u => u.canAutoMigrate).map(u => filePathToPagePath(u.filePath)))]
+      : [null as string | null]
+  if (pagePaths.length === 0) pagePaths.push(null)
+  for (const pagePath of pagePaths) {
+    try {
+      const slotResponse = await fetch(
+        `${config.apiUrl}/public/images/slot/${encodeURIComponent(slotId)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': config.apiKey.trim(),
+          },
+          body: JSON.stringify({
+            file_id: result.file.id,
+            alt_text: altText,
+            page_path: pagePath ?? undefined,
+          }),
+        }
+      )
+      if (!slotResponse.ok) {
+        console.warn(`  ⚠ Slot creation failed for ${slotId}${pagePath != null ? ` @ ${pagePath}` : ''}`)
       }
-    )
-    if (!slotResponse.ok) {
-      // Non-fatal: file uploaded but slot not created
-      console.warn(`  ⚠ Slot creation failed for ${slotId}`)
+    } catch {
+      console.warn(`  ⚠ Slot creation failed for ${slotId}${pagePath != null ? ` @ ${pagePath}` : ''}`)
     }
-  } catch {
-    // Non-fatal: file uploaded but slot not created
-    console.warn(`  ⚠ Slot creation failed for ${slotId}`)
   }
 
   return {

@@ -35,7 +35,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import useAuthStore from '@/lib/auth-store'
-import useFilesStore from '@/lib/files-store'
+import { useFiles, useUploadFile, filesKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from '@/lib/toast'
 import {
   Select,

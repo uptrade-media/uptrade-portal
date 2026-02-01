@@ -26,7 +26,6 @@ import {
 import {
   FileText,
   Download,
-  Loader2,
   Calendar,
   TrendingUp,
   TrendingDown,
@@ -39,7 +38,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useSeoStore } from '@/lib/seo-store';
+import { UptradeSpinner } from '@/components/UptradeLoading';
+import { useGscOverview, useSeoPages, useSeoOpportunities } from '@/lib/hooks';
 import useAuthStore from '@/lib/auth-store';
 
 // Report sections configuration
@@ -89,7 +89,14 @@ export function SEOClientReportButton({ projectId, variant = 'default', classNam
 
 export function SEOClientReportModal({ open, onClose, projectId }) {
   const { currentOrg } = useAuthStore();
-  const { gscOverview, pages, opportunities } = useSeoStore();
+  
+  // Use React Query hooks instead of store
+  const { data: gscOverview } = useGscOverview(projectId, '28d', { enabled: open && !!projectId });
+  const { data: pagesData } = useSeoPages(projectId, { limit: 50 }, { enabled: open && !!projectId });
+  const { data: opportunitiesData } = useSeoOpportunities(projectId, { status: 'open' }, { enabled: open && !!projectId });
+  
+  const pages = pagesData?.pages || [];
+  const opportunities = opportunitiesData?.opportunities || [];
   
   const [generating, setGenerating] = useState(false);
   const [preview, setPreview] = useState(false);
@@ -260,7 +267,7 @@ export function SEOClientReportModal({ open, onClose, projectId }) {
           <Button onClick={handleGenerate} disabled={generating}>
             {generating ? (
               <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
                 Generating...
               </>
             ) : (

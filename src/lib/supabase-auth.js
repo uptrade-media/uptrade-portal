@@ -162,16 +162,11 @@ export async function getCurrentUser() {
   }
   
   if (!contact) {
-    console.error('[getCurrentUser] Error fetching contact:', error)
-    console.log('[getCurrentUser] Returning fallback user object')
-    // If contact doesn't exist yet, return basic user info
-    return {
-      id: session.user.id,
-      email: session.user.email,
-      name: session.user.user_metadata?.name || session.user.email,
-      role: 'client',
-      authUserId: session.user.id
-    }
+    console.error('[getCurrentUser] No contact record found for authenticated user:', session.user.email)
+    console.log('[getCurrentUser] User must have a contact record to access the portal')
+    // SECURITY: Do NOT create a fallback user object
+    // Users must have a contact record in the database to access the system
+    return null
   }
   
   console.log('[getCurrentUser] Contact found:', contact.email, 'org_id:', contact.org_id)

@@ -81,8 +81,8 @@ export default function SitePagesPanel({ project, pages = [] }) {
                   {page.title || <span className="text-muted-foreground italic">No title</span>}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={page.is_indexed ? "default" : "secondary"}>
-                    {page.is_indexed ? 'Indexed' : 'No Index'}
+                  <Badge variant={page.index_status === 'indexed' || page.indexing_verdict === 'PASS' || page.is_indexed ? "default" : "secondary"}>
+                    {page.index_status === 'indexed' || page.indexing_verdict === 'PASS' || page.is_indexed ? 'Indexed' : 'No Index'}
                   </Badge>
                 </TableCell>
                 <TableCell>

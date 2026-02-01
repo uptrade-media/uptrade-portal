@@ -21,9 +21,15 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Progress } from '@/components/ui/progress'
+import { EmptyState } from '@/components/EmptyState'
 
-// Stores
-import { useUptradeTasksStore, useDeliverablesStore, UPTRADE_TASK_MODULE_CONFIG } from '@/lib/projects-v2-store'
+// Hooks
+import {
+  useUptradeTasksStats,
+  useDeliverables,
+  useDeliverablesPendingApprovals,
+  UPTRADE_TASK_MODULE_CONFIG,
+} from '@/lib/hooks'
 
 // Module icon mapping (matches Sidebar.jsx)
 const MODULE_ICONS = {
@@ -204,7 +210,13 @@ function ConnectionStatus({ connections = [], onManage }) {
       </CardHeader>
       <CardContent className="space-y-2">
         {connected.length === 0 && pending.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No connections set up yet</p>
+          <EmptyState.Card
+            icon={Link2}
+            title="No connections set up yet"
+            description="Connect platforms to sync data and tasks."
+            actionLabel="Manage Connections"
+            onAction={onManage}
+          />
         ) : (
           <>
             {connected.map(conn => (
@@ -221,14 +233,16 @@ function ConnectionStatus({ connections = [], onManage }) {
             ))}
           </>
         )}
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="w-full mt-2"
-          onClick={onManage}
-        >
-          Manage Connections
-        </Button>
+        {!(connected.length === 0 && pending.length === 0) && (
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="w-full mt-2"
+            onClick={onManage}
+          >
+            Manage Connections
+          </Button>
+        )}
       </CardContent>
     </Card>
   )
@@ -242,8 +256,9 @@ export default function ProjectOverviewPanel({
   onNavigateToConnections,
   onViewDeliverable,
 }) {
-  const { stats: taskStats } = useUptradeTasksStore()
-  const { deliverables, pendingApprovals } = useDeliverablesStore()
+  const { data: taskStats } = useUptradeTasksStats(project?.id, { enabled: !!project?.id })
+  const { data: deliverables = [] } = useDeliverables(project?.id, {}, { enabled: !!project?.id })
+  const { data: pendingApprovals = [] } = useDeliverablesPendingApprovals(project?.id, { enabled: !!project?.id })
 
   // Calculate module stats from task stats
   const moduleStats = useMemo(() => {

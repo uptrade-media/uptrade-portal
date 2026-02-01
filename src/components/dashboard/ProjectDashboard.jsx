@@ -61,12 +61,13 @@ import {
 } from 'lucide-react'
 import useAuthStore from '@/lib/auth-store'
 import { useBrandColors } from '@/hooks/useBrandColors'
-import useSiteAnalyticsStore from '@/lib/site-analytics-store'
-import { useSeoStore } from '@/lib/seo-store'
-import { getCommerceDashboard, getOfferings } from '@/lib/commerce-store'
+import { useSiteAnalyticsOverview, useSiteTopPages, usePageViewsByDay } from '@/lib/hooks'
+import { useCommerceDashboard, useCommerceOfferings, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { seoApi, syncApi } from '@/lib/portal-api'
 import { cn } from '@/lib/utils'
 import { format, subDays, formatDistanceToNow } from 'date-fns'
+import { EmptyState } from '@/components/EmptyState'
 
 // ==================== Widget Components ====================
 
@@ -615,10 +616,11 @@ function TopPagesWidget({ pages, isLoading, brandColors, onNavigate }) {
             ))}
           </div>
         ) : (
-          <div className="text-center py-8 text-[var(--text-tertiary)]">
-            <FileText className="w-10 h-10 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No page data yet</p>
-          </div>
+          <EmptyState.Card
+            icon={FileText}
+            title="No page data yet"
+            description="Page views will appear here once data is available."
+          />
         )}
       </CardContent>
     </Card>
@@ -784,7 +786,7 @@ export default function ProjectDashboard({ onNavigate }) {
   const { currentOrg, currentProject } = useAuthStore()
   const brandColors = useBrandColors()
   
-  // Data states (analytics comes from store)
+  // Data states (non-analytics data)
   const [isLoading, setIsLoading] = useState(true)
   const [seoData, setSeoData] = useState(null)
   const [commerceData, setCommerceData] = useState(null)
@@ -818,17 +820,16 @@ export default function ProjectDashboard({ onNavigate }) {
   // Track if we've fetched to prevent double-fetch
   const lastFetchedProjectId = useRef(null)
   
-  // Use the analytics store for proper data fetching
+  // Use React Query hooks for analytics data (replaces useSiteAnalyticsStore)
+  const hasAnalytics = enabledFeatures.includes('analytics')
   const { 
-    setProjectId: setAnalyticsProjectId,
-    fetchAllAnalytics,
-    overview: analyticsOverview,
-    pageViewsByDay,
-    topPages: storeTopPages,
-    isLoading: analyticsLoading
-  } = useSiteAnalyticsStore()
+    data: analyticsOverview, 
+    isLoading: analyticsLoading 
+  } = useSiteAnalyticsOverview(projectId, 30, { enabled: !!projectId && hasAnalytics })
+  const { data: pageViewsByDay } = usePageViewsByDay(projectId, 30, { enabled: !!projectId && hasAnalytics })
+  const { data: storeTopPages } = useSiteTopPages(projectId, 30, 20, { enabled: !!projectId && hasAnalytics })
   
-  // Fetch all dashboard data - set projectId and fetch in sequence
+  // Fetch all dashboard data (non-analytics) - React Query handles analytics
   useEffect(() => {
     if (!projectId) return
     // Only fetch if we haven't fetched for this project yet
@@ -839,24 +840,12 @@ export default function ProjectDashboard({ onNavigate }) {
       setIsLoading(true)
       
       // Check modules at fetch time using current enabledFeatures
-      const hasAnalytics = enabledFeatures.includes('analytics')
       const hasSeo = enabledFeatures.includes('seo')
       const hasCommerce = enabledFeatures.includes('commerce') || enabledFeatures.includes('ecommerce')
       // Note: Sync is UNIVERSAL - not gated by feature flag
       
       try {
-        // Fetch analytics via store - MUST set projectId first, then fetch
-        if (hasAnalytics) {
-          try {
-            // Set projectId in store first, then immediately fetch
-            setAnalyticsProjectId(projectId)
-            // Small delay to ensure state is set (zustand is synchronous but let's be safe)
-            await fetchAllAnalytics(30)
-            console.log('[ProjectDashboard] Analytics fetched for project:', projectId)
-          } catch (err) {
-            console.error('[ProjectDashboard] Analytics error:', err)
-          }
-        }
+        // Analytics is now handled by React Query hooks above
         
         // Fetch SEO data
         if (hasSeo) {
@@ -902,7 +891,7 @@ export default function ProjectDashboard({ onNavigate }) {
     }
     
     fetchData()
-  }, [projectId, enabledFeatures, fetchAllAnalytics, setAnalyticsProjectId])
+  }, [projectId, enabledFeatures])
   
   // Calculate summary stats from analytics store
   // API returns: { summary: { pageViews, uniqueVisitors, ... }, topPages, dailyPageViews, ... }
@@ -926,7 +915,8 @@ export default function ProjectDashboard({ onNavigate }) {
   const topPages = storeTopPages || []
   
   return (
-    <div className="space-y-6">
+    <div className="h-full min-h-0 overflow-auto p-6">
+      <div className="space-y-6">
       {/* Project Header */}
       <div className="bg-gradient-to-br from-[var(--glass-bg)] to-[var(--surface-secondary)] backdrop-blur-xl rounded-2xl p-6 border border-[var(--glass-border)] shadow-[var(--shadow-lg)]">
         <div className="flex items-center justify-between flex-wrap gap-4">
@@ -1139,6 +1129,7 @@ export default function ProjectDashboard({ onNavigate }) {
             )
           })}
         </div>
+      </div>
       </div>
     </div>
   )

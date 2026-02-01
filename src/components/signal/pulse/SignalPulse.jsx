@@ -27,7 +27,9 @@ import {
   Layers
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useSignalStore } from '@/lib/signal-store'
+import { useSignalStore } from '@/lib/signal-store' // Keep for streaming UI state
+import { useSignalAnalytics, signalKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import SignalAILogo from '../SignalAILogo'
 import { 
   SignalAmbient, 

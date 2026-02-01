@@ -252,6 +252,9 @@ export function ManagedImage({
         src={imageUrl}
         alt={imageData?.alt_text || alt || ''}
         title={imageData?.title || undefined}
+        data-managed-image="true"
+        data-slot-id={slotId}
+        data-page-path={currentPath}
         className={className}
         style={{
           objectFit,

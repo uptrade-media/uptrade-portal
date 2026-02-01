@@ -1,5 +1,6 @@
 // src/components/affiliates/EditAffiliateDialog.jsx
 // Dialog to edit an existing affiliate
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect } from 'react'
 import { Globe, Loader2 } from 'lucide-react'
@@ -23,11 +24,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import useAffiliatesStore from '@/lib/affiliates-store'
+import { useUpdateAffiliate } from '@/lib/hooks'
 import { toast } from 'sonner'
 
 export default function EditAffiliateDialog({ affiliate, children }) {
-  const { updateAffiliate } = useAffiliatesStore()
+  const updateAffiliateMutation = useUpdateAffiliate()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -66,7 +67,7 @@ export default function EditAffiliateDialog({ affiliate, children }) {
 
     setIsSubmitting(true)
     try {
-      await updateAffiliate(affiliate.id, formData)
+      await updateAffiliateMutation.mutateAsync({ affiliateId: affiliate.id, updates: formData })
       toast.success('Affiliate updated')
       setOpen(false)
     } catch (error) {

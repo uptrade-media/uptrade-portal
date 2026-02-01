@@ -1,6 +1,7 @@
 // src/components/seo/SEOOpportunities.jsx
 // Opportunities list with filtering and actions
-import { useState, useEffect } from 'react'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,58 +18,60 @@ import {
   AlertTriangle,
   TrendingUp
 } from 'lucide-react'
-import { useSeoStore } from '@/lib/seo-store'
+import { 
+  useSeoOpportunities, 
+  useUpdateSeoOpportunity,
+  useGenerateSeoOpportunities 
+} from '@/hooks/seo'
 import EffortEstimate, { calculateTotalEffort } from './signal/EffortEstimate'
 
 export default function SEOOpportunities({ site, projectId, onSelectPage }) {
-  const { 
-    opportunities,
-    opportunitiesLoading,
-    fetchOpportunities,
-    updateOpportunity,
-    detectOpportunities
-  } = useSeoStore()
-
+  // Local UI state
   const [statusFilter, setStatusFilter] = useState('open')
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [detecting, setDetecting] = useState(false)
   const [updatingIds, setUpdatingIds] = useState(new Set())
 
   // Use projectId directly (new architecture) or fallback to site.id (legacy)
   const siteId = projectId || site?.id
 
-  // Fetch opportunities when filters change
-  useEffect(() => {
-    if (siteId) {
-      fetchOpportunities(siteId, {
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        priority: priorityFilter !== 'all' ? priorityFilter : undefined,
-        type: typeFilter !== 'all' ? typeFilter : undefined
-      })
-    }
-  }, [siteId, statusFilter, priorityFilter, typeFilter])
+  // React Query: Fetch opportunities with filters
+  // Automatically refetches when filters change!
+  const { 
+    data: opportunitiesData, 
+    isLoading: opportunitiesLoading 
+  } = useSeoOpportunities(siteId, {
+    status: statusFilter !== 'all' ? statusFilter : undefined,
+    priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+    type: typeFilter !== 'all' ? typeFilter : undefined,
+  })
 
-  const handleDetect = async () => {
-    setDetecting(true)
-    try {
-      await detectOpportunities(siteId)
-    } finally {
-      setDetecting(false)
-    }
+  // Extract opportunities from response (ensure array)
+  const opportunitiesRaw = opportunitiesData?.opportunities ?? opportunitiesData?.data ?? opportunitiesData
+  const opportunities = Array.isArray(opportunitiesRaw) ? opportunitiesRaw : []
+
+  // React Query: Mutations
+  const updateOpportunityMutation = useUpdateSeoOpportunity()
+  const generateOpportunities = useGenerateSeoOpportunities()
+
+  const handleDetect = () => {
+    generateOpportunities.mutate(siteId)
   }
 
-  const handleUpdateStatus = async (id, status) => {
+  const handleUpdateStatus = (id, status) => {
     setUpdatingIds(prev => new Set([...prev, id]))
-    try {
-      await updateOpportunity(id, { status })
-    } finally {
-      setUpdatingIds(prev => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    }
+    updateOpportunityMutation.mutate(
+      { opportunityId: id, updates: { status } },
+      {
+        onSettled: () => {
+          setUpdatingIds(prev => {
+            const next = new Set(prev)
+            next.delete(id)
+            return next
+          })
+        }
+      }
+    )
   }
 
   const getPriorityColor = (priority) => {
@@ -231,8 +234,8 @@ export default function SEOOpportunities({ site, projectId, onSelectPage }) {
           </Select>
         </div>
 
-        <Button onClick={handleDetect} disabled={detecting}>
-          {detecting ? (
+        <Button onClick={handleDetect} disabled={generateOpportunities.isLoading}>
+          {generateOpportunities.isLoading ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (
             <Zap className="h-4 w-4 mr-2" />
@@ -257,8 +260,8 @@ export default function SEOOpportunities({ site, projectId, onSelectPage }) {
                   ? 'Try changing the filters'
                   : 'Run opportunity detection to find SEO issues'}
               </p>
-              <Button onClick={handleDetect} disabled={detecting}>
-                {detecting ? 'Detecting...' : 'Detect Opportunities'}
+              <Button onClick={handleDetect} disabled={generateOpportunities.isLoading}>
+                {generateOpportunities.isLoading ? 'Detecting...' : 'Detect Opportunities'}
               </Button>
             </div>
           ) : (

@@ -1,6 +1,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva } from "class-variance-authority";
+import { UptradeSpinner } from "@/components/UptradeLoading"
 
 import { cn } from "@/lib/utils"
 
@@ -49,6 +50,9 @@ function Button({
   variant,
   size,
   asChild = false,
+  loading = false,
+  disabled,
+  children,
   ...props
 }) {
   const Comp = asChild ? Slot : "button"
@@ -57,7 +61,15 @@ function Button({
     <Comp
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
-      {...props} />
+      disabled={loading || disabled}
+      {...props}
+    >
+      {loading ? (
+        <UptradeSpinner size="sm" className="gap-0 py-0 [&_svg]:m-0 [&_p]:hidden" />
+      ) : (
+        children
+      )}
+    </Comp>
   );
 }
 

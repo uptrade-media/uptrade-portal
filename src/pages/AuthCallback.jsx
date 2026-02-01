@@ -2,8 +2,9 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import useAuthStore from '../lib/auth-store'
-import { authApi } from '../lib/portal-api'
+import { authApi, contactsApi } from '../lib/portal-api'
 import { supabase, getCurrentUser } from '../lib/supabase-auth'
+import { uploadGoogleAvatarToStorage } from '../lib/avatar-utils'
 
 export default function AuthCallback() {
   const navigate = useNavigate()
@@ -153,19 +154,43 @@ export default function AuthCallback() {
         
         if (contactUser) {
           console.log('[AuthCallback] Found contact:', contactUser.email)
-          setUser(contactUser)
+          let userToSet = contactUser
+
+          // Google avatar: direct upload to Supabase storage (no base64), then set as contact avatar
+          const googlePicture = user.user_metadata?.picture ?? user.user_metadata?.avatar_url
+          if (googlePicture) {
+            const avatarUrl = await uploadGoogleAvatarToStorage(googlePicture, user.id)
+            if (avatarUrl) {
+              try {
+                await contactsApi.patch(contactUser.id, { avatar: avatarUrl })
+                userToSet = { ...contactUser, avatar: avatarUrl }
+                console.log('[AuthCallback] Avatar saved to storage and contact updated')
+              } catch (patchErr) {
+                console.warn('[AuthCallback] Contact avatar patch failed:', patchErr?.response?.data ?? patchErr)
+              }
+            }
+          }
+
+          setUser(userToSet)
           
           // Fetch organization context
           await fetchOrganizationContext(session.access_token)
           
           // Double check auth state was set
           const { isAuthenticated } = useAuthStore.getState()
-          console.log('[AuthCallback] Auth state after setUser:', { isAuthenticated, user: contactUser.email })
+          console.log('[AuthCallback] Auth state after setUser:', { isAuthenticated, user: userToSet.email })
           
           console.log('[AuthCallback] Auth successful, redirecting to dashboard')
           navigate('/dashboard', { replace: true })
         } else {
-          console.error('[AuthCallback] No contact found for user')
+          // SECURITY: User authenticated via OAuth but has no contact record
+          // Sign them out to prevent session from persisting
+          console.error('[AuthCallback] No contact found for user - signing out')
+          try {
+            await supabase.auth.signOut()
+          } catch (signOutError) {
+            console.error('[AuthCallback] Error signing out:', signOutError)
+          }
           navigate('/login?error=no_contact', { replace: true })
         }
       } catch (error) {

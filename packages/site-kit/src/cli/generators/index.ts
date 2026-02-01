@@ -97,6 +97,35 @@ UPTRADE_API_KEY=${newVars['UPTRADE_API_KEY']}
 // Provider Generator
 // ============================================
 
+/**
+ * Safely adds an import statement to a file, respecting 'use client'/'use server' directives
+ */
+function addImportSafely(content: string, importStatement: string): string {
+  // Check if import already exists
+  const importModule = importStatement.match(/from\s+['"]([^'"]+)['"]/)?.[1]
+  if (importModule && content.includes(importModule)) {
+    return content
+  }
+  
+  // Check for 'use client' or 'use server' directive at the start
+  const directiveMatch = content.match(/^(['"]use (client|server)['"][\s;]*\n?)/)
+  
+  if (directiveMatch) {
+    // Insert import AFTER the directive
+    const directive = directiveMatch[0]
+    const restOfFile = content.slice(directive.length)
+    return directive + importStatement + '\n' + restOfFile
+  } else {
+    // No directive, add import at the top before other imports
+    const firstImportMatch = content.match(/^(import\s+)/)
+    if (firstImportMatch) {
+      return importStatement + '\n' + content
+    } else {
+      return importStatement + '\n\n' + content
+    }
+  }
+}
+
 export async function generateProvider(options: ProviderOptions): Promise<void> {
   // Find the layout file
   const layoutPath = await findLayoutFile()
@@ -111,18 +140,13 @@ export async function generateProvider(options: ProviderOptions): Promise<void> 
     return // Already configured
   }
 
-  // Add import
-  let newContent = content
+  // Create backup first
+  const backupPath = layoutPath + '.backup'
+  await fs.writeFile(backupPath, content, 'utf-8')
 
-  // Find where to add import (after other imports)
-  const lastImportIndex = content.lastIndexOf('import ')
-  const lastImportEndIndex = content.indexOf('\n', lastImportIndex)
-  
-  const importStatement = `\nimport { SiteKitProvider } from '@uptrade/site-kit'`
-  newContent = 
-    content.slice(0, lastImportEndIndex) + 
-    importStatement + 
-    content.slice(lastImportEndIndex)
+  // Add import safely (respects 'use client' directive)
+  const importStatement = `import { SiteKitProvider } from '@uptrade/site-kit'`
+  let newContent = addImportSafely(content, importStatement)
 
   // Wrap children with SiteKitProvider
   // Look for {children} and wrap it

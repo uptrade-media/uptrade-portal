@@ -73,6 +73,7 @@ import { cn } from '@/lib/utils';
 import { format, addHours, startOfHour } from 'date-fns';
 import { useBroadcastStore } from '@/stores/broadcastStore';
 import useAuthStore from '@/lib/auth-store';
+import { useBroadcastInsights, transformInsightsForComponent } from '@/hooks/useBroadcastInsights';
 import { PlatformIcon, PlatformSelector } from './PlatformIcon';
 import { toast } from 'sonner';
 
@@ -96,48 +97,6 @@ const ASPECT_RATIOS = [
   { id: '4:5', label: '4:5', description: 'Portrait', icon: RectangleVertical, width: 4, height: 5 },
   { id: '1:1', label: '1:1', description: 'Square', icon: Square, width: 1, height: 1 },
 ];
-
-// Trending sounds mock data - PLATFORM SPECIFIC (would come from API)
-const PLATFORM_TRENDING_SOUNDS = {
-  tiktok: [
-    { id: 'tt-1', name: 'original sound - @viral_creator', artist: '@viral_creator', uses: '8.2M', duration: '15s', category: 'trending', hot: true },
-    { id: 'tt-2', name: 'Aesthetic Vibes Remix', artist: 'TikTok Sounds', uses: '4.1M', duration: '30s', category: 'aesthetic' },
-    { id: 'tt-3', name: 'Funny Timing SFX', artist: 'Comedy Central', uses: '12.4M', duration: '5s', category: 'comedy', hot: true },
-    { id: 'tt-4', name: 'Motivation Speech', artist: 'Gary V Clips', uses: '2.8M', duration: '20s', category: 'motivation' },
-    { id: 'tt-5', name: 'Transition Whoosh', artist: 'Effects Lab', uses: '18.9M', duration: '3s', category: 'transition' },
-  ],
-  instagram: [
-    { id: 'ig-1', name: 'Trending Audio', artist: 'Reels Sounds', uses: '3.4M', duration: '30s', category: 'trending', hot: true },
-    { id: 'ig-2', name: 'Chill Lo-Fi Beat', artist: 'ChillHop', uses: '2.1M', duration: '45s', category: 'chill' },
-    { id: 'ig-3', name: 'Upbeat Energy', artist: 'Feel Good Inc', uses: '1.8M', duration: '20s', category: 'hype' },
-    { id: 'ig-4', name: 'Soft Aesthetic', artist: 'Dreamy', uses: '890K', duration: '40s', category: 'aesthetic' },
-  ],
-  youtube: [
-    { id: 'yt-1', name: 'Royalty-Free Pop', artist: 'YouTube Audio', uses: '5.2M', duration: '60s', category: 'trending', hot: true },
-    { id: 'yt-2', name: 'Epic Cinematic', artist: 'Film Score', uses: '3.8M', duration: '45s', category: 'hype' },
-    { id: 'yt-3', name: 'Acoustic Chill', artist: 'Indie Vibes', uses: '1.2M', duration: '60s', category: 'chill' },
-  ],
-  facebook: [
-    { id: 'fb-1', name: 'Viral Sound 2024', artist: 'Facebook Sounds', uses: '1.2M', duration: '30s', category: 'trending' },
-    { id: 'fb-2', name: 'Happy Background', artist: 'Music Library', uses: '890K', duration: '45s', category: 'chill' },
-  ],
-  snapchat: [
-    { id: 'snap-1', name: 'Spotlight Trending', artist: 'Snap Sounds', uses: '2.1M', duration: '15s', category: 'trending', hot: true },
-    { id: 'snap-2', name: 'Quick Vibe', artist: 'Gen-Z Audio', uses: '1.4M', duration: '10s', category: 'hype' },
-  ],
-};
-
-// Fallback for combined view
-const TRENDING_SOUNDS = [
-  { id: '1', name: 'Aesthetic Vibes', artist: 'Trending', uses: '2.4M', duration: '30s', category: 'aesthetic' },
-  { id: '2', name: 'Hype Energy', artist: 'Viral Mix', uses: '1.8M', duration: '15s', category: 'hype' },
-  { id: '3', name: 'Chill Beats', artist: 'Lo-Fi', uses: '3.1M', duration: '45s', category: 'chill' },
-  { id: '4', name: 'Motivational', artist: 'Inspire', uses: '890K', duration: '20s', category: 'motivation' },
-  { id: '5', name: 'Comedy Timing', artist: 'Funny Sounds', uses: '4.2M', duration: '10s', category: 'comedy' },
-  { id: '6', name: 'Transition Beat', artist: 'Effects', uses: '5.6M', duration: '8s', category: 'transition' },
-];
-
-const SOUND_CATEGORIES = ['All', 'Trending', 'Aesthetic', 'Hype', 'Chill', 'Comedy', 'Motivation'];
 
 // =============================================================================
 // PLATFORM-SPECIFIC CONTENT - Trends, hooks, formats vary by platform
@@ -283,211 +242,64 @@ const SUGGESTED_TIMES = [
 ];
 
 // =============================================================================
-// SOUNDS & EFFECTS PANEL - Left column with platform-specific sounds
+// SOUNDS & EFFECTS PANEL - Shows Original Audio indicator
 // =============================================================================
 
 function SoundsPanel({ selectedSound, onSelectSound, onAddEffect, selectedPlatforms = [] }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [activeTab, setActiveTab] = useState('sounds');
-  const [isPlaying, setIsPlaying] = useState(null);
-  const [activePlatformTab, setActivePlatformTab] = useState(selectedPlatforms[0] || 'tiktok');
-
-  // Update active platform when selectedPlatforms changes
-  useEffect(() => {
-    if (selectedPlatforms.length > 0 && !selectedPlatforms.includes(activePlatformTab)) {
-      setActivePlatformTab(selectedPlatforms[0]);
-    }
-  }, [selectedPlatforms, activePlatformTab]);
-
-  // Get sounds for the active platform
-  const platformSounds = useMemo(() => {
-    return PLATFORM_TRENDING_SOUNDS[activePlatformTab] || TRENDING_SOUNDS;
-  }, [activePlatformTab]);
-
-  const filteredSounds = useMemo(() => {
-    return platformSounds.filter(sound => {
-      const matchesSearch = sound.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           sound.artist.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = activeCategory === 'All' || 
-                             sound.category.toLowerCase() === activeCategory.toLowerCase();
-      return matchesSearch && matchesCategory;
-    });
-  }, [platformSounds, searchQuery, activeCategory]);
-
   return (
     <div className="flex flex-col">
       <div className="border-b border-[var(--glass-border)] bg-gradient-to-r from-[var(--brand-primary)]/10 to-[var(--brand-secondary)]/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <Music className="h-5 w-5 text-[var(--brand-primary)]" />
-          <h3 className="font-semibold text-[var(--text-primary)]">Sounds & Effects</h3>
+          <h3 className="font-semibold text-[var(--text-primary)]">Audio</h3>
         </div>
         <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-          Trending audio boosts reach by 40%
+          Audio from your uploaded video will be used
         </p>
       </div>
 
-      {/* Platform Sound Selector - Each platform has different trending sounds */}
-      {selectedPlatforms.length > 1 && (
-        <div className="border-b border-[var(--glass-border)] bg-[var(--glass-bg-inset)] px-4 py-2">
-          <Label className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-2 block">
-            Sounds for platform
-          </Label>
-          <div className="flex gap-1.5">
-            {selectedPlatforms.map((platform) => (
-              <button
-                key={platform}
-                onClick={() => setActivePlatformTab(platform)}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all',
-                  activePlatformTab === platform
-                    ? 'bg-[var(--brand-primary)] text-white shadow-sm'
-                    : 'bg-[var(--glass-bg)] text-[var(--text-secondary)] hover:bg-[var(--glass-bg-hover)]'
-                )}
-              >
-                <PlatformIcon platform={platform} size={14} />
-                <span className="capitalize">{platform}</span>
-              </button>
-            ))}
+      <div className="p-4 space-y-4">
+        {/* Original Audio Indicator */}
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--brand-primary)]/30 bg-[var(--brand-primary)]/10 p-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--brand-primary)] to-[var(--brand-secondary)]">
+            <Volume2 className="h-6 w-6 text-white" />
           </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Original Audio</p>
+            <p className="text-xs text-[var(--text-tertiary)]">Audio from uploaded video</p>
+          </div>
+          <Check className="h-5 w-5 text-[var(--brand-primary)]" />
         </div>
-      )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-        <TabsList className="mx-4 mt-3 grid grid-cols-2">
-          <TabsTrigger value="sounds" className="text-xs">
-            <Music className="mr-1.5 h-3.5 w-3.5" />
-            Sounds
-          </TabsTrigger>
-          <TabsTrigger value="effects" className="text-xs">
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+        <p className="text-xs text-[var(--text-tertiary)] text-center">
+          Add trending sounds directly in {selectedPlatforms.length > 0 ? selectedPlatforms.join(', ') : 'the app'} after posting
+        </p>
+
+        {/* Effects Section */}
+        <div className="pt-4 border-t border-[var(--glass-border)]">
+          <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-3">
+            <Sparkles className="h-3.5 w-3.5" />
             Effects
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="sounds" className="flex-1 flex flex-col mt-0 p-0">
-          <div className="p-4 space-y-3">
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={`Search ${activePlatformTab} sounds...`}
-                className="pl-9 h-9"
-              />
-            </div>
-
-            {/* Categories */}
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {SOUND_CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  className={cn(
-                    'rounded-full px-3 py-1 text-xs whitespace-nowrap transition-colors',
-                    activeCategory === cat
-                      ? 'bg-[var(--brand-primary)] text-white'
-                      : 'bg-[var(--glass-bg)] text-[var(--text-secondary)] hover:bg-[var(--glass-bg-hover)]'
-                  )}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="px-4 pb-4">
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {filteredSounds.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <Music className="h-8 w-8 text-[var(--text-tertiary)] mb-2" />
-                  <p className="text-sm text-[var(--text-secondary)]">No sounds found</p>
-                  <p className="text-xs text-[var(--text-tertiary)]">Try a different search or category</p>
-                </div>
-              ) : (
-                filteredSounds.map((sound) => (
-                <button
-                  key={sound.id}
-                  onClick={() => onSelectSound(sound)}
-                  className={cn(
-                    'group flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all',
-                    selectedSound?.id === sound.id
-                      ? 'border-[var(--brand-primary)] bg-[var(--brand-primary)]/10'
-                      : 'border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--brand-primary)]/50'
-                  )}
-                >
-                  <div 
-                    className={cn(
-                      'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
-                      selectedSound?.id === sound.id ? 'bg-[var(--brand-primary)]' : 'bg-[var(--surface-secondary)]'
-                    )}
-                    onClick={(e) => { e.stopPropagation(); setIsPlaying(isPlaying === sound.id ? null : sound.id); }}
-                  >
-                    {isPlaying === sound.id ? (
-                      <Pause className={cn('h-4 w-4', selectedSound?.id === sound.id ? 'text-white' : 'text-[var(--text-tertiary)]')} />
-                    ) : (
-                      <Play className={cn('h-4 w-4', selectedSound?.id === sound.id ? 'text-white' : 'text-[var(--text-tertiary)]')} />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-medium text-[var(--text-primary)] truncate">{sound.name}</p>
-                      {sound.hot && (
-                        <Badge className="h-4 bg-gradient-to-r from-[var(--brand-primary)] to-[var(--brand-secondary)] px-1.5 text-[9px] text-white">
-                          <Flame className="mr-0.5 h-2.5 w-2.5" />
-                          HOT
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-[var(--text-tertiary)]">{sound.artist} • {sound.duration}</p>
-                  </div>
-                  <div className="text-right">
-                    <div className="flex items-center gap-1 text-xs text-[var(--brand-primary)]">
-                      <TrendingUp className="h-3 w-3" />
-                      {sound.uses}
-                    </div>
-                  </div>
-                </button>
-              ))
-              )}
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="effects" className="flex-1 mt-0 p-4">
+          </h4>
           <div className="grid grid-cols-2 gap-3">
             {[
               { icon: Palette, label: 'Filters', count: '24' },
               { icon: Type, label: 'Text Styles', count: '18' },
               { icon: Sticker, label: 'Stickers', count: '100+' },
               { icon: Zap, label: 'Transitions', count: '32' },
-              { icon: Sparkles, label: 'AR Effects', count: '50' },
-              { icon: Mic, label: 'Voice Effects', count: '12' },
             ].map((effect) => (
               <button
                 key={effect.label}
                 onClick={() => onAddEffect?.(effect.label)}
-                className="flex flex-col items-center gap-2 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-4 transition-colors hover:border-[var(--brand-primary)]/50"
+                className="flex flex-col items-center gap-2 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-3 transition-colors hover:border-[var(--brand-primary)]/50"
               >
-                <effect.icon className="h-6 w-6 text-[var(--text-secondary)]" />
+                <effect.icon className="h-5 w-5 text-[var(--text-secondary)]" />
                 <span className="text-xs font-medium text-[var(--text-primary)]">{effect.label}</span>
-                <Badge variant="secondary" className="text-[10px]">{effect.count}</Badge>
               </button>
             ))}
           </div>
-          
-          <div className="mt-4 rounded-lg border border-[var(--brand-secondary)]/30 bg-[var(--brand-secondary)]/10 p-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-[var(--brand-secondary)]">
-              <Flame className="h-3.5 w-3.5" />
-              Trending Effects
-            </div>
-            <p className="mt-1 text-xs text-[var(--text-secondary)]">
-              Green screen and transitions are trending this week!
-            </p>
-          </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
     </div>
   );
 }
@@ -622,29 +434,15 @@ function PlatformToolsPanel({
   onSelectSound,
   onHookClick,
   onHashtagAdd,
+  // Real insights data from API
+  platformHooks = [],
+  platformFormats = [],
+  platformTopics = [],
+  platformTimes = [],
+  insightsLoading = false,
+  insightsSource = null,
 }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [activeTab, setActiveTab] = useState('sounds');
-  const [isPlaying, setIsPlaying] = useState(null);
-
-  // Get platform-specific data
-  const platformSounds = PLATFORM_TRENDING_SOUNDS[activePlatform] || TRENDING_SOUNDS;
-  const platformHooks = PLATFORM_TRENDING_HOOKS[activePlatform] || [];
-  const platformFormats = PLATFORM_VIRAL_FORMATS[activePlatform] || [];
-  const platformTopics = PLATFORM_TRENDING_TOPICS[activePlatform] || [];
-  const platformTimes = PLATFORM_PEAK_TIMES[activePlatform] || [];
   const colors = PLATFORM_COLORS[activePlatform] || { primary: '#666' };
-
-  const filteredSounds = useMemo(() => {
-    return platformSounds.filter(sound => {
-      const matchesSearch = sound.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           sound.artist.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = activeCategory === 'All' || 
-                             sound.category.toLowerCase() === activeCategory.toLowerCase();
-      return matchesSearch && matchesCategory;
-    });
-  }, [platformSounds, searchQuery, activeCategory]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -751,100 +549,28 @@ function PlatformToolsPanel({
             </div>
           </div>
 
-          {/* Sounds Section */}
+          {/* Audio Section */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
-                <Music className="h-3.5 w-3.5" style={{ color: colors.primary }} />
-                Trending Sounds
-              </h4>
+            <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+              <Music className="h-3.5 w-3.5" style={{ color: colors.primary }} />
+              Audio
+            </h4>
+            <div className="flex items-center gap-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-3">
+              <div 
+                className="flex h-10 w-10 items-center justify-center rounded-lg"
+                style={{ backgroundColor: colors.primary }}
+              >
+                <Volume2 className="h-5 w-5 text-white" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-[var(--text-primary)]">Original Audio</p>
+                <p className="text-xs text-[var(--text-tertiary)]">From uploaded video</p>
+              </div>
+              <Check className="h-5 w-5" style={{ color: colors.primary }} />
             </div>
-            
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={`Search ${activePlatform} sounds...`}
-                className="pl-9 h-9"
-              />
-            </div>
-
-            {/* Categories */}
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {SOUND_CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  className={cn(
-                    'rounded-full px-3 py-1 text-xs whitespace-nowrap transition-colors',
-                    activeCategory === cat
-                      ? 'text-white'
-                      : 'bg-[var(--glass-bg)] text-[var(--text-secondary)] hover:bg-[var(--glass-bg-hover)]'
-                  )}
-                  style={activeCategory === cat ? { backgroundColor: colors.primary } : {}}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-
-            {/* Sounds List */}
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {filteredSounds.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <Music className="h-8 w-8 text-[var(--text-tertiary)] mb-2" />
-                  <p className="text-sm text-[var(--text-secondary)]">No sounds found</p>
-                </div>
-              ) : (
-                filteredSounds.map((sound) => (
-                  <button
-                    key={sound.id}
-                    onClick={() => onSelectSound(sound)}
-                    className={cn(
-                      'group flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all',
-                      selectedSound?.id === sound.id
-                        ? 'border-[var(--brand-primary)] bg-[var(--brand-primary)]/10'
-                        : 'border-[var(--glass-border)] bg-[var(--glass-bg)] hover:border-[var(--brand-primary)]/50'
-                    )}
-                  >
-                    <div 
-                      className={cn(
-                        'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
-                        selectedSound?.id === sound.id ? '' : 'bg-[var(--surface-secondary)]'
-                      )}
-                      style={selectedSound?.id === sound.id ? { backgroundColor: colors.primary } : {}}
-                      onClick={(e) => { e.stopPropagation(); setIsPlaying(isPlaying === sound.id ? null : sound.id); }}
-                    >
-                      {isPlaying === sound.id ? (
-                        <Pause className={cn('h-4 w-4', selectedSound?.id === sound.id ? 'text-white' : 'text-[var(--text-tertiary)]')} />
-                      ) : (
-                        <Play className={cn('h-4 w-4', selectedSound?.id === sound.id ? 'text-white' : 'text-[var(--text-tertiary)]')} />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-medium text-[var(--text-primary)] truncate">{sound.name}</p>
-                        {sound.hot && (
-                          <Badge className="h-4 px-1.5 text-[9px] text-white" style={{ backgroundColor: colors.primary }}>
-                            <Flame className="mr-0.5 h-2.5 w-2.5" />
-                            HOT
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-[var(--text-tertiary)]">{sound.artist} • {sound.duration}</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="flex items-center gap-1 text-xs" style={{ color: colors.primary }}>
-                        <TrendingUp className="h-3 w-3" />
-                        {sound.uses}
-                      </div>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
+            <p className="text-[10px] text-[var(--text-tertiary)] text-center">
+              Add trending sounds in {activePlatform} after posting
+            </p>
           </div>
 
           {/* AI Assistant */}
@@ -1086,6 +812,11 @@ export function ReelComposer({
   const [caption, setCaption] = useState('');
   const [platforms, setPlatforms] = useState([]);
   const [activePlatform, setActivePlatform] = useState(connectedPlatforms[0] || 'instagram'); // NEW: Active platform for context
+
+  // Fetch real insights for the active platform (peak times, formats, trends, hooks)
+  const insights = useBroadcastInsights(projectId, activePlatform);
+  const insightsData = transformInsightsForComponent(insights);
+
   const [hashtags, setHashtags] = useState([]);
   const [hashtagInput, setHashtagInput] = useState('');
   const [videoFile, setVideoFile] = useState(null);
@@ -1280,6 +1011,13 @@ export function ReelComposer({
               onSelectSound={setSelectedSound}
               onHookClick={handleHookClick}
               onHashtagAdd={handleHashtagFromTrending}
+              // Real insights data from API
+              platformHooks={insightsData.platformHooks}
+              platformFormats={insightsData.platformFormats}
+              platformTopics={insightsData.platformTopics}
+              platformTimes={insightsData.platformTimes}
+              insightsLoading={insights.isLoading}
+              insightsSource={insights.source}
             />
           </div>
 

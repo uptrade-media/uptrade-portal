@@ -11,6 +11,7 @@
  */
 import axios from 'axios'
 import { supabase } from './supabase-auth'
+import useAuthStore from './auth-store'
 
 // Portal API URL - uses NestJS backend for real-time features
 const PORTAL_API_URL = import.meta.env.VITE_PORTAL_API_URL || 'https://api.uptrademedia.com'
@@ -40,8 +41,7 @@ portalApi.interceptors.request.use(
       config.headers.Authorization = `Bearer ${session.access_token}`
     }
     
-    // Import auth store dynamically to avoid circular dependency
-    const { default: useAuthStore } = await import('./auth-store')
+    // Get auth state for organization/project context headers
     const state = useAuthStore.getState()
     
     // Check if this is an agency org
@@ -139,6 +139,10 @@ export const authApi = {
   // Mark setup complete for authenticated user
   markSetupComplete: () => 
     portalApi.post('/auth/mark-setup-complete'),
+
+  // Sync Google profile picture to Supabase Storage (server-side fetch, no CORS)
+  syncGoogleAvatar: (data) =>
+    portalApi.post('/auth/me/sync-avatar', data),
   
   // Logout - invalidates Redis auth cache
   logout: () => 
@@ -147,6 +151,35 @@ export const authApi = {
   // Submit support request
   submitSupport: (data) => 
     portalApi.post('/auth/support', data),
+}
+
+// ============================================================================
+// OAuth API (platform connections: Google, etc.)
+// ============================================================================
+
+export const oauthApi = {
+  /** Get OAuth connection status for all platforms for a project */
+  getConnectionStatus: (projectId) =>
+    portalApi.get(`/oauth/status/${projectId}`).then(r => r.data),
+
+  /** Get OAuth initiate URL for a platform. Returns { url, state }. Use popupMode: true for popup flow (callback will postMessage to opener). */
+  initiate: (platform, projectId, modules, returnUrl, options = {}) =>
+    portalApi.get(`/oauth/initiate/${platform}`, {
+      params: {
+        projectId,
+        modules: Array.isArray(modules) ? modules.join(',') : modules,
+        returnUrl,
+        popupMode: options.popupMode === true ? 'true' : undefined,
+      },
+    }).then(r => r.data),
+
+  /** Get available GSC properties for a connection (after OAuth for SEO module) */
+  getGscProperties: (connectionId) =>
+    portalApi.get(`/oauth/connections/${connectionId}/gsc-properties`).then(r => r.data),
+
+  /** Select a GSC property for a connection */
+  selectGscProperty: (connectionId, propertyUrl) =>
+    portalApi.post(`/oauth/connections/${connectionId}/select-property`, { propertyUrl }).then(r => r.data),
 }
 
 // ============================================================================
@@ -226,7 +259,30 @@ export const messagesApi = {
   saveEchoMessages: (data) => 
     portalApi.post('/messages/echo/save', data),
   
-  // Uploads
+  // Attachments
+  uploadAttachment: async (messageId, file) => {
+    // Convert file to base64
+    const buffer = await file.arrayBuffer()
+    const base64 = btoa(
+      new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+    )
+    return portalApi.post(`/messages/${messageId}/attachments`, {
+      file: {
+        buffer: base64,
+        originalname: file.name,
+        mimetype: file.type,
+        size: file.size,
+      }
+    })
+  },
+  
+  getAttachmentUrl: (attachmentId, expiresIn = 3600) => 
+    portalApi.get(`/messages/attachments/${attachmentId}/url`, { params: { expires: expiresIn } }),
+  
+  deleteAttachment: (attachmentId) => 
+    portalApi.delete(`/messages/attachments/${attachmentId}`),
+  
+  // Legacy file uploads (for backwards compatibility)
   uploadAttachments: (files) => {
     const formData = new FormData()
     files.forEach(file => formData.append('files', file))
@@ -247,6 +303,118 @@ export const messagesApi = {
   
   sendGroupMessage: (groupId, data) => 
     portalApi.post(`/messages/groups/${groupId}/messages`, data),
+}
+
+// ============================================================================
+// ChatKit API (User-to-User & Visitor Messaging via ChatKit protocol)
+// ============================================================================
+
+export const chatkitApi = {
+  // Threads. Params: thread_type, limit, after (cursor), updated_since (sync). See docs/CHATKIT-PAGINATION in portal-api.
+  getThreads: (params = {}) =>
+    portalApi.get('/chatkit/threads', { params }),
+
+  getThread: (threadId) =>
+    portalApi.get(`/chatkit/threads/${threadId}`),
+  
+  createThread: (data) => 
+    portalApi.post('/chatkit/threads', data),
+  
+  deleteThread: (threadId) => 
+    portalApi.delete(`/chatkit/threads/${threadId}`),
+  
+  pinThread: (threadId, pinned) =>
+    portalApi.patch(`/chatkit/threads/${threadId}/pin`, { pinned }),
+  
+  // Items (messages). Params: limit, after (cursor), order (asc|desc). See docs/CHATKIT-PAGINATION in portal-api.
+  getItems: (threadId, params = {}) =>
+    portalApi.get(`/chatkit/threads/${threadId}/items`, { params }),
+  
+  // Messages
+  sendMessage: (data) => 
+    portalApi.post('/chatkit/messages', data),
+
+  // Reactions (Phase 2.4)
+  addReaction: (threadId, itemId, emoji) =>
+    portalApi.post(`/chatkit/threads/${threadId}/items/${itemId}/reactions`, { emoji }),
+
+  removeReaction: (threadId, itemId, emoji) =>
+    portalApi.delete(`/chatkit/threads/${threadId}/items/${itemId}/reactions/${encodeURIComponent(emoji)}`),
+  
+  // Contacts
+  getContacts: () => 
+    portalApi.get('/chatkit/contacts'),
+
+  // Presence (Phase 2.10). user_ids: string[] or comma-separated string.
+  getPresence: (userIds) => {
+    const ids = Array.isArray(userIds) ? userIds.join(',') : (userIds ?? '')
+    return portalApi.get('/chatkit/presence', { params: { user_ids: ids } })
+  },
+
+  // Channels (Phase 2.8 / 2.9). thread_type 'channel'.
+  createChannel: (data) =>
+    portalApi.post('/chatkit/channels', data),
+  listChannels: (params = {}) =>
+    portalApi.get('/chatkit/channels', { params }),
+  joinChannel: (threadId) =>
+    portalApi.post(`/chatkit/channels/${threadId}/join`),
+  leaveChannel: (threadId) =>
+    portalApi.post(`/chatkit/channels/${threadId}/leave`),
+
+  // Link preview (Phase 3.2.2)
+  getLinkPreview: (url) =>
+    portalApi.get('/chatkit/link-preview', { params: { url } }),
+
+  // Mute (Phase 3.4.1)
+  muteThread: (threadId) =>
+    portalApi.post(`/chatkit/threads/${threadId}/mute`),
+  unmuteThread: (threadId) =>
+    portalApi.post(`/chatkit/threads/${threadId}/unmute`),
+
+  // Search (Phase 3.3.1)
+  search: (query, type = 'all', limit) =>
+    portalApi.get('/chatkit/search', { params: { q: query, type, limit } }),
+
+  // Analytics (Phase 3.7.1)
+  getResponseTimeStats: (threadType, startDate, endDate) =>
+    portalApi.get('/chatkit/analytics/response-time', {
+      params: { thread_type: threadType, start_date: startDate, end_date: endDate }
+    }),
+
+  // Audit & Export (Phase 3.5.1)
+  exportThread: (threadId, format = 'json') =>
+    portalApi.get(`/chatkit/export/thread/${threadId}`, {
+      params: { format },
+      responseType: 'blob'
+    }),
+
+  exportOrg: (startDate, endDate) =>
+    portalApi.get('/chatkit/export/org', {
+      params: { start_date: startDate, end_date: endDate },
+      responseType: 'blob'
+    }),
+
+  // Report & Block (Phase 3.5.3)
+  reportMessage: (messageId, reason, details) =>
+    portalApi.post('/chatkit/reports/message', { message_id: messageId, reason, details }),
+
+  reportUser: (userId, reason, details) =>
+    portalApi.post('/chatkit/reports/user', { user_id: userId, reason, details }),
+
+  listReports: (status, limit) =>
+    portalApi.get('/chatkit/reports', { params: { status, limit } }),
+
+  updateReport: (reportId, status, notes) =>
+    portalApi.patch(`/chatkit/reports/${reportId}`, { status, notes }),
+
+  blockUser: (userId, reason) =>
+    portalApi.post(`/chatkit/blocks/${userId}`, { reason }),
+
+  unblockUser: (userId) =>
+    portalApi.delete(`/chatkit/blocks/${userId}`),
+
+  getBlocks: () =>
+    portalApi.get('/chatkit/blocks'),
 }
 
 // ============================================================================
@@ -309,12 +477,12 @@ export const engageApi = {
   getOnlineAgents: () => 
     portalApi.get('/engage/agents/online'),
   
-  // Canned responses
-  getCannedResponses: () => 
-    portalApi.get('/engage/canned-responses'),
+  // Canned responses (under engage/chat controller)
+  getCannedResponses: (search) => 
+    portalApi.get('/engage/chat/canned-responses', { params: search ? { search } : {} }),
   
   createCannedResponse: (data) => 
-    portalApi.post('/engage/canned-responses', data),
+    portalApi.post('/engage/chat/canned-responses', data),
   
   // Analytics
   getAnalytics: (params = {}) => 
@@ -358,6 +526,39 @@ export const engageApi = {
   
   sendChatMessage: (data) =>
     portalApi.post('/engage/chat/messages', data),
+  
+  // Targeting - Triggers
+  listTriggers: (elementId) =>
+    portalApi.get('/engage/targeting/triggers', { params: { elementId } }),
+  
+  createTrigger: (data) =>
+    portalApi.post('/engage/targeting/triggers', data),
+  
+  updateTrigger: (id, data) =>
+    portalApi.put(`/engage/targeting/triggers/${id}`, data),
+  
+  deleteTrigger: (id) =>
+    portalApi.delete(`/engage/targeting/triggers/${id}`),
+  
+  // Targeting - Page Rules
+  listPageRules: (elementId) =>
+    portalApi.get('/engage/targeting/page-rules', { params: { elementId } }),
+  
+  createPageRule: (data) =>
+    portalApi.post('/engage/targeting/page-rules', data),
+  
+  updatePageRule: (id, data) =>
+    portalApi.put(`/engage/targeting/page-rules/${id}`, data),
+  
+  deletePageRule: (id) =>
+    portalApi.delete(`/engage/targeting/page-rules/${id}`),
+  
+  // Targeting - Available Pages & Forms
+  listTargetingPages: (projectId) =>
+    portalApi.get('/engage/targeting/pages', { params: { projectId } }),
+  
+  listTargetingForms: (projectId) =>
+    portalApi.get('/engage/targeting/forms', { params: { projectId } }),
 }
 
 // ============================================================================
@@ -618,6 +819,22 @@ export const filesApi = {
   replaceFile: (id, data) => 
     portalApi.post(`/files/${id}/replace`, data),
 
+  /** Create Google Doc (user OAuth). Returns { documentId, editUrl }. */
+  createGoogleDoc: (projectId, title) =>
+    portalApi.post('/files/google/create-doc', { projectId, title }).then(r => r.data),
+
+  /** Create Google Slides (user OAuth). Returns { documentId, editUrl }. */
+  createGoogleSlide: (projectId, title) =>
+    portalApi.post('/files/google/create-slide', { projectId, title }).then(r => r.data),
+
+  /** Create Google Sheet (user OAuth). Returns { documentId, editUrl }. */
+  createGoogleSheet: (projectId, title) =>
+    portalApi.post('/files/google/create-sheet', { projectId, title }).then(r => r.data),
+
+  /** Register an AI-generated image (e.g. from Broadcast) into Files. Returns { success, file, url }. */
+  registerFromAiImage: (projectId, imageUrl, filename) =>
+    portalApi.post('/files/from-ai-image', { projectId, imageUrl, filename }).then(r => r.data),
+
   // Legacy Google Drive endpoints (still used in admin)
   list: (params = {}) => 
     portalApi.get('/files/drive', { params }),
@@ -643,6 +860,20 @@ export const filesApi = {
   
   move: (id, data) => 
     portalApi.put(`/files/drive/${id}/move`, data),
+}
+
+// ============================================================================
+// Screenshots API
+// ============================================================================
+
+export const screenshotsApi = {
+  // Get responsive screenshots for a project (desktop, tablet, mobile)
+  getResponsive: (projectId, force = false) => 
+    portalApi.get(`/screenshots/project/${projectId}/responsive`, { params: { force } }),
+  
+  // Capture new screenshots for a project
+  capture: (projectId) => 
+    portalApi.post(`/screenshots/project/${projectId}/capture`),
 }
 
 // ============================================================================
@@ -707,8 +938,11 @@ export const seoApi = {
   // ==================== PAGES ====================
   listPages: (projectId, params = {}) => 
     portalApi.get(`/seo/projects/${projectId}/pages`, { params }),
+  /** Alias for listPages – SEO hooks and other callers use getPages; same endpoint. */
+  getPages: (projectId, params = {}) => 
+    portalApi.get(`/seo/projects/${projectId}/pages`, { params }),
   
-  getPage: (pageId) => 
+  getPage: (pageId) =>
     portalApi.get(`/seo/pages/${pageId}`),
   
   createPage: (projectId, data) => 
@@ -725,6 +959,13 @@ export const seoApi = {
   
   updatePageMetadata: (pageId, data) =>
     portalApi.put(`/seo/pages/${pageId}`, data),
+  
+  // ==================== PAGE IMAGES ====================
+  getPageImages: (projectId, pageId) =>
+    portalApi.get(`/seo/projects/${projectId}/pages/${pageId}/images`),
+  
+  updatePageImage: (projectId, pageId, imageId, data) =>
+    portalApi.patch(`/seo/projects/${projectId}/pages/${pageId}/images/${imageId}`, data),
   
   // Note: Crawling removed - pages are auto-discovered via site-kit page views
   
@@ -785,6 +1026,18 @@ export const seoApi = {
   listKeywords: (projectId, params = {}) => 
     portalApi.get(`/seo/projects/${projectId}/queries`, { params }),
   
+  getTrackedKeywords: (projectId) =>
+    portalApi.get(`/seo/projects/${projectId}/queries/tracked`),
+  
+  getKeywordsSummary: (projectId) =>
+    portalApi.get(`/seo/projects/${projectId}/queries/summary`),
+  
+  getRankingHistory: (projectId, keywordId, options = {}) =>
+    portalApi.get(`/seo/projects/${projectId}/queries/history`, { params: { keywordId, ...options } }),
+  
+  trackKeywords: (projectId, keywords) =>
+    portalApi.post(`/seo/projects/${projectId}/queries/track`, { queries: keywords }),
+  
   addKeywords: (projectId, keywords) => 
     portalApi.post(`/seo/projects/${projectId}/queries/track`, { queries: keywords }),
   
@@ -825,6 +1078,9 @@ export const seoApi = {
   
   getGscQueries: (projectId, params = {}) =>
     portalApi.get(`/seo/projects/${projectId}/gsc/queries`, { params }),
+
+  getPageContentSummary: (pageId) =>
+    portalApi.get(`/seo/pages/${pageId}/content-summary`),
   
   getGscPages: (projectId, params = {}) =>
     portalApi.get(`/seo/projects/${projectId}/gsc/pages`, { params }),
@@ -888,17 +1144,17 @@ export const seoApi = {
     portalApi.post(`/seo/projects/${projectId}/content-briefs`, data),
   
   // ==================== ALERTS ====================
-  getAlerts: (projectId) =>
-    portalApi.get(`/seo/projects/${projectId}/alerts`),
+  getAlerts: (projectId, params = {}) =>
+    portalApi.get(`/seo/projects/${projectId}/alerts`, { params }),
   
-  checkAlerts: (projectId) =>
-    portalApi.post(`/seo/projects/${projectId}/alerts/check`),
+  checkAlerts: (projectId, data = {}) =>
+    portalApi.post(`/seo/projects/${projectId}/alerts/check`, data),
   
   acknowledgeAlert: (alertId) =>
     portalApi.put(`/seo/alerts/${alertId}/acknowledge`),
   
-  resolveAlert: (alertId) =>
-    portalApi.put(`/seo/alerts/${alertId}/resolve`),
+  resolveAlert: (alertId, data = {}) =>
+    portalApi.put(`/seo/alerts/${alertId}/resolve`, data),
   
   // ==================== SERP FEATURES ====================
   getSerpFeatures: (projectId, params = {}) =>
@@ -940,6 +1196,13 @@ export const seoApi = {
   saveLocalRankings: (gridId, rankings) =>
     portalApi.post(`/seo/local/grids/${gridId}/rankings`, { rankings }),
   
+  crawlLocalGrid: (gridId, businessName, options = {}) =>
+    portalApi.post(`/seo/local/grids/${gridId}/crawl`, { 
+      businessName, 
+      keywords: options.keywords,
+      delay: options.delay 
+    }),
+  
   // Entity Scores (GBP Health)
   getEntityScore: (projectId) =>
     portalApi.get(`/seo/projects/${projectId}/local/entity-score`),
@@ -950,7 +1213,15 @@ export const seoApi = {
   saveEntityScore: (projectId, data) =>
     portalApi.post(`/seo/projects/${projectId}/local/entity-score`, data),
   
-  // AI analysis uses Signal API via signalSeoApi.analyzeLocalSeo()
+  // Real GBP API Data (requires OAuth connection)
+  getGbpProfile: (projectId) =>
+    portalApi.get(`/seo/${projectId}/gbp/profile`),
+  
+  getGbpReviews: (projectId, limit) =>
+    portalApi.get(`/seo/${projectId}/gbp/reviews`, { params: { limit } }),
+  
+  analyzeGbpEntityHealth: (projectId) =>
+    portalApi.post(`/seo/${projectId}/gbp/entity-health/analyze`),
   
   // Geo Pages (Local Coverage)
   getLocalPages: (projectId, params = {}) =>
@@ -1003,15 +1274,36 @@ export const seoApi = {
   // ==================== INTERNAL LINKS ====================
   getInternalLinks: (projectId) =>
     portalApi.get(`/seo/projects/${projectId}/internal-links`),
-  
-  // Note: analyzeInternalLinks removed - link data comes from site-kit page views
+
+  recalculateInternalLinks: (projectId) =>
+    portalApi.post(`/seo/projects/${projectId}/internal-links/recalculate`),
   
   // ==================== SCHEMA MARKUP ====================
   getSchemaStatus: (projectId) =>
-    portalApi.get(`/seo/projects/${projectId}/schema`),
+    portalApi.get(`/seo/projects/${projectId}/schemas/summary`),
+  getSchemas: (projectId) =>
+    portalApi.get(`/seo/projects/${projectId}/schemas/summary`),
   
-  generateSchema: (projectId, data) =>
-    portalApi.post(`/seo/projects/${projectId}/schema/generate`, data),
+  listSchemas: (projectId, query = {}) =>
+    portalApi.get(`/seo/projects/${projectId}/schemas`, { params: query }),
+  
+  getPageSchemas: (pageId, projectId) =>
+    portalApi.get(`/seo/pages/${pageId}/schemas`, { params: { projectId } }),
+  
+  createSchema: (projectId, data) =>
+    portalApi.post(`/seo/projects/${projectId}/schemas`, data),
+  
+  updateSchema: (schemaId, data) =>
+    portalApi.patch(`/seo/schemas/${schemaId}`, data),
+  
+  deleteSchema: (schemaId) =>
+    portalApi.delete(`/seo/schemas/${schemaId}`),
+  
+  markSchemaImplemented: (schemaId) =>
+    portalApi.post(`/seo/schemas/${schemaId}/implement`),
+  
+  verifySchema: (schemaId) =>
+    portalApi.post(`/seo/schemas/${schemaId}/verify`),
   
   // ==================== TECHNICAL AUDIT ====================
   getTechnicalAudit: (projectId) =>
@@ -1047,6 +1339,8 @@ export const seoApi = {
   // ==================== INDEXING ====================
   getIndexingStatus: (projectId, params = {}) =>
     portalApi.get(`/seo/projects/${projectId}/indexing`, { params }),
+  getIndexingIssues: (projectId, params = {}) =>
+    portalApi.get(`/seo/projects/${projectId}/indexing`, { params }),
   
   getIndexingSummary: (projectId) =>
     portalApi.get(`/seo/projects/${projectId}/indexing/summary`),
@@ -1064,7 +1358,23 @@ export const seoApi = {
   
   analyzeIndexingIssues: (projectId) =>
     portalApi.post(`/seo/projects/${projectId}/indexing/analyze`),
-  
+
+  /** Google Indexing API: submit a single URL for indexing (200/day quota) */
+  submitUrlForIndexing: (projectId, url, type = 'URL_UPDATED') =>
+    portalApi.post(`/seo/projects/${projectId}/indexing/submit`, { url, type }).then(r => r.data),
+
+  /** Google Indexing API: submit multiple URLs (respects daily quota) */
+  submitBulkForIndexing: (projectId, urls, type = 'URL_UPDATED') =>
+    portalApi.post(`/seo/projects/${projectId}/indexing/submit/bulk`, { urls, type }).then(r => r.data),
+
+  /** Remaining Indexing API submissions for today (max 200/day) */
+  getIndexingSubmitQuota: (projectId) =>
+    portalApi.get(`/seo/projects/${projectId}/indexing/submit/quota`).then(r => r.data),
+
+  /** Last submission status for a URL */
+  getIndexingSubmitStatus: (projectId, url) =>
+    portalApi.get(`/seo/projects/${projectId}/indexing/submit/status`, { params: { url } }).then(r => r.data),
+
   // ==================== BLOG AI ====================
   getBlogTopicRecommendations: (projectId) =>
     portalApi.get(`/seo/projects/${projectId}/blog/topics`),
@@ -1105,6 +1415,10 @@ export const seoApi = {
   
   extractSiteMetadata: (projectId) =>
     portalApi.post(`/seo/projects/${projectId}/extract-metadata`),
+
+  /** Crawl sitemap / extract pages metadata (triggers discovery for technical audit & CWV) */
+  crawlSitemap: (projectId) =>
+    portalApi.post(`/seo/projects/${projectId}/extract-metadata`),
   
   // ==================== SITE REVALIDATION ====================
   revalidateSite: (data) =>
@@ -1126,6 +1440,9 @@ export const seoApi = {
   
   createRedirect: (projectId, data) =>
     portalApi.post(`/seo/projects/${projectId}/redirects`, data),
+  
+  updateRedirect: (id, data) =>
+    portalApi.put(`/seo/redirects/${id}`, data),
   
   deleteRedirect: (id) =>
     portalApi.delete(`/seo/redirects/${id}`),
@@ -1182,8 +1499,9 @@ export const seoApi = {
     portalApi.post(`/seo/projects/${projectId}/content-gaps/analyze`, data),
   
   // ==================== GSC SYNC ====================
-  syncGsc: (projectId, data = {}) =>
-    portalApi.post(`/seo/projects/${projectId}/gsc/sync`, data),
+  // Backend uses projectId only; no body (GSC property comes from OAuth connection).
+  syncGsc: (projectId) =>
+    portalApi.post(`/seo/projects/${projectId}/sync/gsc`),
   
   // ==================== SERP ANALYSIS ====================
   analyzeSerpForKeyword: (projectId, data) =>
@@ -1642,6 +1960,102 @@ export const crmApi = {
   
   replyToGmailThread: (prospectId, threadId, data) =>
     portalApi.post(`/crm/gmail/prospects/${prospectId}/threads/${threadId}/reply`, data),
+
+  // ==================== GMAIL INBOX (Full Inbox View) ====================
+  
+  /**
+   * Sync full inbox with classification
+   * @param {Object} options - { maxEmails, forceRefresh }
+   */
+  syncFullInbox: (options = {}) =>
+    portalApi.post('/crm/gmail/inbox/sync', null, { 
+      params: { 
+        maxEmails: options.maxEmails || 100,
+        forceRefresh: options.forceRefresh ? 'true' : undefined
+      } 
+    }),
+  
+  /**
+   * Get classified inbox with filters
+   * @param {Object} options - { classification, needsResponse, includeSpam, limit, offset }
+   */
+  getClassifiedInbox: (options = {}) =>
+    portalApi.get('/crm/gmail/inbox', { 
+      params: { 
+        classification: Array.isArray(options.classification) ? options.classification.join(',') : options.classification,
+        needsResponse: options.needsResponse !== undefined ? options.needsResponse.toString() : undefined,
+        includeSpam: options.includeSpam ? 'true' : undefined,
+        limit: options.limit || 50,
+        offset: options.offset || 0
+      } 
+    }),
+  
+  /**
+   * Get emails needing response (for unified tasks)
+   * @param {Object} options - { priority, limit }
+   */
+  getEmailsNeedingResponse: (options = {}) =>
+    portalApi.get('/crm/gmail/inbox/needs-response', { 
+      params: { 
+        priority: options.priority,
+        limit: options.limit || 20
+      } 
+    }),
+  
+  /**
+   * Get inbox statistics
+   */
+  getInboxStats: () =>
+    portalApi.get('/crm/gmail/inbox/stats'),
+
+  // ==================== LEAD ASSIGNMENT ====================
+
+  /**
+   * Get unassigned leads queue
+   * @param {Object} params - { source, min_score, sort_by, sort_order, limit, offset }
+   */
+  listUnassignedLeads: (params = {}) =>
+    portalApi.get('/crm/assignments/unassigned', { params }),
+
+  /**
+   * Get count of unassigned leads
+   */
+  getUnassignedLeadCount: () =>
+    portalApi.get('/crm/assignments/unassigned/count'),
+
+  /**
+   * Assign a lead to a team member
+   * @param {Object} data - { contact_id, assigned_to, assignment_type, reason, notify }
+   */
+  assignLead: (data) =>
+    portalApi.post('/crm/assignments/assign', data),
+
+  /**
+   * Bulk assign multiple leads
+   * @param {Object} data - { contact_ids, assigned_to, assignment_type, notify }
+   */
+  bulkAssignLeads: (data) =>
+    portalApi.post('/crm/assignments/bulk-assign', data),
+
+  /**
+   * Claim an unassigned lead for yourself
+   * @param {string} contactId - Contact ID to claim
+   */
+  claimLead: (contactId) =>
+    portalApi.post('/crm/assignments/claim', { contact_id: contactId }),
+
+  /**
+   * Get assignment history for a lead
+   * @param {string} contactId - Contact ID
+   */
+  getLeadAssignmentHistory: (contactId) =>
+    portalApi.get(`/crm/assignments/history/${contactId}`),
+
+  /**
+   * Get team assignment statistics
+   */
+  getTeamAssignmentStats: () =>
+    portalApi.get('/crm/assignments/stats'),
 }
 
 // ============================================================================
@@ -1658,6 +2072,10 @@ export const reputationApi = {
   
   connectPlatform: (projectId, data) =>
     portalApi.post(`/reputation/projects/${projectId}/platforms`, data),
+
+  /** Link unified Google OAuth connection to reputation (after user selects GBP location). */
+  linkGoogleConnection: (projectId, connectionId) =>
+    portalApi.post(`/reputation/projects/${projectId}/platforms/link-google-connection`, { connectionId }),
   
   updatePlatform: (id, data) =>
     portalApi.put(`/reputation/platforms/${id}`, data),
@@ -1669,8 +2087,8 @@ export const reputationApi = {
     portalApi.post(`/reputation/platforms/${id}/sync`),
   
   // Reviews
-  listReviews: (params = {}) =>
-    portalApi.get('/reputation/reviews', { params }),
+  listReviews: (projectId, params = {}) =>
+    portalApi.get(`/reputation/projects/${projectId}/reviews`, { params }),
   
   getReview: (id) =>
     portalApi.get(`/reputation/reviews/${id}`),
@@ -1678,29 +2096,57 @@ export const reputationApi = {
   respondToReview: (id, data) =>
     portalApi.post(`/reputation/reviews/${id}/respond`, data),
   
+  generateResponse: (reviewId) =>
+    portalApi.post(`/reputation/reviews/${reviewId}/generate-response`),
+  
+  approveResponse: (reviewId) =>
+    portalApi.post(`/reputation/reviews/${reviewId}/approve-response`),
+  
+  rejectResponse: (reviewId) =>
+    portalApi.post(`/reputation/reviews/${reviewId}/reject-response`),
+  
   updateReview: (id, data) =>
     portalApi.put(`/reputation/reviews/${id}`, data),
   
   // Auto-response settings
   getSettings: (projectId) =>
-    portalApi.get('/reputation/settings', { params: { projectId } }),
+    portalApi.get(`/reputation/projects/${projectId}/settings`),
   
   updateSettings: (projectId, data) =>
-    portalApi.put('/reputation/settings', { projectId, ...data }),
+    portalApi.put(`/reputation/projects/${projectId}/settings`, data),
   
   // Analytics
   getOverview: (projectId, params = {}) =>
-    portalApi.get('/reputation/overview', { params: { projectId, ...params } }),
+    portalApi.get(`/reputation/projects/${projectId}/overview`, { params }),
   
   getSentimentTrends: (projectId, params = {}) =>
-    portalApi.get('/reputation/sentiment-trends', { params: { projectId, ...params } }),
+    portalApi.get(`/reputation/projects/${projectId}/sentiment-trends`, { params }),
   
   getTopKeywords: (projectId, params = {}) =>
-    portalApi.get('/reputation/keywords', { params: { projectId, ...params } }),
+    portalApi.get(`/reputation/projects/${projectId}/keywords`, { params }),
   
   // Page matching (SEO integration)
   matchReviewsToPages: (projectId) =>
-    portalApi.post('/reputation/match-pages', { projectId }),
+    portalApi.post(`/reputation/projects/${projectId}/match-pages`),
+
+  // Review Removal
+  analyzeRemoval: (reviewId) =>
+    portalApi.get(`/reputation/reviews/${reviewId}/analyze-removal`),
+  
+  flagForRemoval: (reviewId, data) =>
+    portalApi.post(`/reputation/reviews/${reviewId}/flag-removal`, data),
+  
+  submitRemoval: (reviewId) =>
+    portalApi.post(`/reputation/reviews/${reviewId}/submit-removal`),
+  
+  escalateRemovalEmail: (reviewId, data = {}) =>
+    portalApi.post(`/reputation/reviews/${reviewId}/escalate-email`, data),
+  
+  updateRemovalStatus: (reviewId, data) =>
+    portalApi.put(`/reputation/reviews/${reviewId}/removal-status`, data),
+  
+  getFlaggedReviews: (projectId) =>
+    portalApi.get(`/reputation/projects/${projectId}/flagged-reviews`),
 }
 
 // ============================================================================
@@ -1916,15 +2362,6 @@ export const reportsApi = {
   getDashboard: (params = {}) => 
     portalApi.get('/dashboard', { params }),
   
-  getProjectReports: (params = {}) => 
-    portalApi.get('/analytics/projects', { params }),
-  
-  getRevenueReport: (params = {}) => 
-    portalApi.get('/analytics/revenue', { params }),
-  
-  getTeamMetrics: (params = {}) => 
-    portalApi.get('/analytics/team', { params }),
-  
   getDeadlines: (params = {}) => 
     portalApi.get('/dashboard/deadlines', { params }),
   
@@ -1947,6 +2384,12 @@ export const reportsApi = {
   runLighthouseAudit: (data) => 
     portalApi.post('/audits/lighthouse', data),
   
+  // Aliases for use-reports.js hooks
+  lighthouse: (projectId) =>
+    portalApi.get('/audits/lighthouse', { params: { project_id: projectId } }),
+  runAudit: (projectId, params = {}) =>
+    portalApi.post('/audits/lighthouse', { projectId, ...params }),
+  
   // Rep dashboard
   getRepDashboard: () =>
     portalApi.get('/dashboard/rep'),
@@ -1954,6 +2397,12 @@ export const reportsApi = {
   // Activity timeline
   getActivity: (params = {}) =>
     portalApi.get('/dashboard/activity', { params }),
+
+  // Aliases for hooks (use-reports.js)
+  dashboard: (params = {}) => portalApi.get('/dashboard', { params }),
+  activity: (params = {}) => portalApi.get('/dashboard/activity', { params }),
+  financial: (params = {}) => portalApi.get('/dashboard', { params }),
+  project: (id, params = {}) => portalApi.get(`/analytics/projects/${id}`, { params }),
 }
 
 // ============================================================================
@@ -2133,6 +2582,19 @@ export const adminApi = {
   removeOrgMember: (organizationId, contactId) => 
     portalApi.delete(`/admin/organizations/${organizationId}/members/${contactId}`),
   
+  // Organization Roles
+  listOrgRoles: (organizationId, scope) => 
+    portalApi.get(`/admin/organizations/${organizationId}/roles`, { params: { scope } }),
+  
+  createOrgRole: (organizationId, body) => 
+    portalApi.post(`/admin/organizations/${organizationId}/roles`, body),
+  
+  updateOrgRole: (organizationId, roleId, body) => 
+    portalApi.patch(`/admin/organizations/${organizationId}/roles/${roleId}`, body),
+  
+  deleteOrgRole: (organizationId, roleId) => 
+    portalApi.delete(`/admin/organizations/${organizationId}/roles/${roleId}`),
+  
   // Organization Settings (branding, theme, preferences)
   updateOrgSettings: (organizationId, settings) => 
     portalApi.put(`/admin/organizations/${organizationId}/settings`, settings),
@@ -2192,12 +2654,12 @@ export const driveApi = {
   downloadFile: (fileId) => 
     portalApi.get(`/files/drive/${fileId}/download`),
   
-  // Delete file
-  deleteFile: (fileId, permanent = false) => 
-    portalApi.post(`/files/drive/${fileId}/delete`, { permanent }),
-  
+  // Delete file (backend: DELETE /files/drive with body { fileId, permanent })
+  deleteFile: (fileId, permanent = false) =>
+    portalApi.delete('/files/drive', { data: { fileId, permanent } }),
+
   // Create folder
-  createFolder: (name, parentId = null) => 
+  createFolder: (name, parentId = null) =>
     portalApi.post('/files/drive/folder', { name, parentId }),
 }
 
@@ -2264,9 +2726,6 @@ export const ecommerceApi = {
   
   listTenantInvoices: (tenantId, params = {}) =>
     portalApi.get(`/ecommerce/tenants/${tenantId}/invoices`, { params }),
-  
-  getTenantSalesStats: (tenantId) =>
-    portalApi.get(`/ecommerce/tenants/${tenantId}/sales-stats`),
 }
 
 // ============================================================================
@@ -2744,6 +3203,536 @@ export const syncApi = {
   /** Create a booking */
   createBooking: (data) =>
     portalApi.post('/sync/public/booking', data),
+
+  // ==================== UNIFIED TASKS - Motion-style Command Center ====================
+  
+  /**
+   * Get unified tasks from all sources
+   * Returns: needs_decision, today, overdue, upcoming, completed_today, summary
+   */
+  getUnifiedTasks: (projectId) =>
+    portalApi.get('/sync/admin/unified-tasks', { 
+      params: projectId ? { project_id: projectId } : {} 
+    }),
+  
+  /**
+   * Get Signal autonomous activity (What Signal Did feed)
+   * Returns completed actions from last 24h
+   */
+  getSignalActivity: (limit = 50) =>
+    portalApi.get('/sync/admin/signal-activity', { params: { limit } }),
+  
+  /**
+   * Get calendar items for a date range
+   * Includes synced tasks, bookings, and events
+   */
+  getCalendarItems: (startDate, endDate, projectId) =>
+    portalApi.get('/sync/admin/calendar-items', { 
+      params: { 
+        start_date: startDate, 
+        end_date: endDate,
+        ...(projectId ? { project_id: projectId } : {})
+      } 
+    }),
+
+  /**
+   * Create a unified task from Sync command center
+   * Routes to correct module (project, uptrade, crm, seo) based on source_type
+   * @param {Object} data - Task data
+   * @param {string} data.source_type - 'project_task' | 'uptrade_task' | 'crm_reminder' | 'seo_task'
+   * @param {string} data.title - Task title
+   * @param {string} data.project_id - Project ID
+   * @param {string} [data.description] - Task description
+   * @param {string} [data.due_date] - Due date (ISO format)
+   * @param {string} [data.priority] - 'low' | 'normal' | 'high' | 'urgent'
+   * @param {string} [data.assigned_to] - User ID to assign
+   * @param {number} [data.estimated_hours] - Estimated hours
+   * @param {string} [data.prospect_id] - CRM: Prospect/contact ID
+   * @param {string} [data.reminder_type] - CRM: call | email | meeting | follow_up
+   * @param {string} [data.page_id] - SEO: Page ID
+   * @param {string} [data.opportunity_id] - SEO: Opportunity ID
+   * @param {string} [data.category] - Project: Task category
+   * @param {string} [data.depends_on] - Project: Dependency task ID
+   */
+  createUnifiedTask: (data) =>
+    portalApi.post('/sync/admin/tasks', data),
+
+  // ==================== TEAM VIEW - Manager & Admin Features ====================
+  
+  /**
+   * Get current user's role permissions and available view modes
+   * Returns: permissions, available_views (personal, team, overview)
+   */
+  getUserPermissions: () =>
+    portalApi.get('/sync/admin/user-permissions'),
+  
+  /**
+   * Get team members the user can manage (lower hierarchy level)
+   * Requires can_assign_tasks permission
+   */
+  getTeamMembers: (projectId) =>
+    portalApi.get('/sync/admin/team-members', {
+      params: projectId ? { project_id: projectId } : {}
+    }),
+  
+  /**
+   * Get tasks for team members (manager view)
+   * Returns tasks grouped by team member with capacity info
+   * Requires can_assign_tasks permission
+   */
+  getTeamTasks: (projectId, assigneeId) =>
+    portalApi.get('/sync/admin/team-tasks', {
+      params: {
+        ...(projectId ? { project_id: projectId } : {}),
+        ...(assigneeId ? { assignee_id: assigneeId } : {})
+      }
+    }),
+  
+  /**
+   * Get org-wide task overview (admin view)
+   * Returns aggregated stats across all projects and assignees
+   * Requires can_access_all_projects permission
+   */
+  getOrgOverview: () =>
+    portalApi.get('/sync/admin/org-overview'),
+  
+  /**
+   * Get team capacity for workload balancing
+   * Returns capacity percentage and workload per team member
+   * Requires can_assign_tasks permission
+   */
+  getTeamCapacity: () =>
+    portalApi.get('/sync/admin/team-capacity'),
+
+  // ==================== PLAYBOOKS - Growth Task Templates ====================
+  
+  /**
+   * Get all playbooks (org + system templates)
+   * Returns playbooks with step counts and usage stats
+   */
+  getPlaybooks: () =>
+    portalApi.get('/sync/admin/playbooks'),
+  
+  /**
+   * Get a single playbook with all steps
+   */
+  getPlaybook: (id) =>
+    portalApi.get(`/sync/admin/playbooks/${id}`),
+  
+  /**
+   * Create a custom playbook
+   * @param {Object} data - Playbook data
+   * @param {string} data.name - Playbook name
+   * @param {string} [data.description] - Description
+   * @param {string} [data.icon] - Icon name
+   * @param {string} [data.category] - leads | seo | reputation | content | general
+   * @param {Array} data.steps - Array of step objects
+   */
+  createPlaybook: (data) =>
+    portalApi.post('/sync/admin/playbooks', data),
+  
+  /**
+   * Update a playbook
+   */
+  updatePlaybook: (id, data) =>
+    portalApi.put(`/sync/admin/playbooks/${id}`, data),
+  
+  /**
+   * Delete a playbook (cannot delete system playbooks)
+   */
+  deletePlaybook: (id) =>
+    portalApi.delete(`/sync/admin/playbooks/${id}`),
+  
+  /**
+   * Apply a playbook to create tasks
+   * @param {string} id - Playbook ID
+   * @param {Object} data - Apply options
+   * @param {string} data.project_id - Project to create tasks in
+   * @param {string} [data.contact_id] - Contact to link CRM tasks to
+   * @param {string} [data.start_date] - Start date for due date calculation
+   * @param {Object} [data.variables] - Variable substitutions for task titles
+   */
+  applyPlaybook: (id, data) =>
+    portalApi.post(`/sync/admin/playbooks/${id}/apply`, data),
+}
+
+// ============================================================================
+// SEO Location Pages API
+// ============================================================================
+
+export const locationPagesApi = {
+  // ==================== LOCATIONS ====================
+  
+  /**
+   * Get all locations for a project
+   */
+  getLocations: (projectId) =>
+    portalApi.get('/seo/location-pages/locations', { params: { project_id: projectId } }).then(res => res.data),
+  
+  /**
+   * Get a single location with full context
+   */
+  getLocation: (locationId) =>
+    portalApi.get(`/seo/location-pages/locations/${locationId}`).then(res => res.data),
+  
+  /**
+   * Create a new location
+   */
+  createLocation: (data) =>
+    portalApi.post('/seo/location-pages/locations', data).then(res => res.data),
+  
+  /**
+   * Update location context (landmarks, court info, etc.)
+   */
+  updateLocationContext: (locationId, context) =>
+    portalApi.put(`/seo/location-pages/locations/${locationId}/context`, context).then(res => res.data),
+  
+  // ==================== LANDMARK DISCOVERY ====================
+  
+  /**
+   * Discover landmarks for a location using Places API
+   */
+  discoverLandmarks: (locationId, categories) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/discover-landmarks`, { categories }).then(res => res.data),
+  
+  /**
+   * Discover courthouses for a location (law firms)
+   */
+  discoverCourthouses: (locationId) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/discover-courthouses`).then(res => res.data),
+  
+  // ==================== SERVICE LOCATIONS ====================
+  
+  /**
+   * Get all service locations for a location
+   */
+  getServiceLocations: (locationId) =>
+    portalApi.get(`/seo/location-pages/locations/${locationId}/services`).then(res => res.data),
+  
+  /**
+   * Create or update a service location
+   */
+  upsertServiceLocation: (locationId, data) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/services`, data).then(res => res.data),
+  
+  // ==================== CASE OUTCOMES ====================
+  
+  /**
+   * Get case outcomes for a location
+   */
+  getCaseOutcomes: ({ projectId, county, serviceSlug, limit }) =>
+    portalApi.get('/seo/location-pages/case-outcomes', {
+      params: { project_id: projectId, county, service_slug: serviceSlug, limit }
+    }).then(res => res.data),
+  
+  // ==================== PAGE GENERATION ====================
+  
+  /**
+   * Generate a single location page using Signal AI
+   */
+  generateLocationPage: (data) =>
+    portalApi.post('/seo/location-pages/generate', data).then(res => res.data),
+  
+  /**
+   * Bulk generate location pages
+   */
+  bulkGenerateLocationPages: (data) =>
+    portalApi.post('/seo/location-pages/generate/bulk', data).then(res => res.data),
+  
+  /**
+   * Build context rails for a location page (preview without generating)
+   */
+  buildContextRails: (data) =>
+    portalApi.post('/seo/location-pages/context-rails', data).then(res => res.data),
+  
+  // ==================== LOCATION PAGES CRUD ====================
+  
+  /**
+   * Get all generated location pages for a project
+   */
+  getLocationPages: ({ projectId, status, locationId }) =>
+    portalApi.get('/seo/location-pages/pages', {
+      params: { project_id: projectId, status, location_id: locationId }
+    }).then(res => res.data),
+  
+  /**
+   * Update location page status
+   */
+  updatePageStatus: (pageId, status) =>
+    portalApi.put(`/seo/location-pages/pages/${pageId}/status`, { status }).then(res => res.data),
+  
+  /**
+   * Publish location page to client site
+   */
+  publishToSite: (pageId, projectId) =>
+    portalApi.post(`/seo/location-pages/pages/${pageId}/publish`, null, {
+      params: { project_id: projectId }
+    }).then(res => res.data),
+  
+  // ==================== CENSUS DEMOGRAPHICS ====================
+  
+  /**
+   * Get all counties in a state
+   * @param {string} state - State abbreviation (e.g., 'KY', 'OH')
+   */
+  getCountiesInState: (state) =>
+    portalApi.get(`/seo/location-pages/census/states/${state}/counties`).then(res => res.data),
+  
+  /**
+   * Get county boundaries (GeoJSON) for a state
+   * @param {string} state - State abbreviation
+   */
+  getCountyBoundaries: (state) =>
+    portalApi.get(`/seo/location-pages/census/states/${state}/boundaries`).then(res => res.data),
+  
+  /**
+   * Get demographics for a specific county
+   * @param {string} state - State abbreviation
+   * @param {string} countyFips - County FIPS code (3 digits)
+   */
+  getCountyDemographics: (state, countyFips) =>
+    portalApi.get(`/seo/location-pages/census/states/${state}/counties/${countyFips}/demographics`).then(res => res.data),
+  
+  /**
+   * Get bulk demographics for multiple counties
+   * @param {Object} data - { counties: [{ state: 'KY', county_fips: '037' }, ...] }
+   */
+  getBulkDemographics: (data) =>
+    portalApi.post('/seo/location-pages/census/demographics/bulk', data).then(res => res.data),
+  
+  /**
+   * Get counties within a radius of a point
+   * @param {Object} params - { lat, lng, radius_miles }
+   */
+  getCountiesNearby: (params) =>
+    portalApi.get('/seo/location-pages/census/nearby', { params }).then(res => res.data),
+  
+  /**
+   * Get adjacent counties
+   * @param {string} state - State abbreviation
+   * @param {string} countyFips - County FIPS code
+   */
+  getAdjacentCounties: (state, countyFips) =>
+    portalApi.get(`/seo/location-pages/census/states/${state}/counties/${countyFips}/adjacent`).then(res => res.data),
+  
+  /**
+   * Find a county by name
+   * @param {string} state - State abbreviation
+   * @param {string} name - County name to search for
+   */
+  findCountyByName: (state, name) =>
+    portalApi.get(`/seo/location-pages/census/states/${state}/find-county`, { params: { name } }).then(res => res.data),
+  
+  /**
+   * Discover demographics for a location and store in context
+   * @param {string} locationId - Location UUID
+   */
+  discoverDemographics: (locationId) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/discover-demographics`).then(res => res.data),
+  
+  // ==================== HERO IMAGE GENERATION ====================
+  
+  /**
+   * Generate an AI hero image for a location page
+   * @param {string} locationId - Location UUID
+   * @param {Object} data - { service_slug, service_name, style?, aspect_ratio? }
+   */
+  generateHeroImage: (locationId, data) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/generate-hero-image`, data).then(res => res.data),
+  
+  /**
+   * Get all generated images for a location
+   * @param {string} locationId - Location UUID
+   */
+  getLocationImages: (locationId) =>
+    portalApi.get(`/seo/location-pages/locations/${locationId}/images`).then(res => res.data),
+  
+  /**
+   * Delete a generated image
+   * @param {string} imageId - Image UUID
+   */
+  deleteImage: (imageId) =>
+    portalApi.delete(`/seo/location-pages/images/${imageId}`).then(res => res.data),
+  
+  // ============================================================================
+  // SCHEMA MARKUP
+  // ============================================================================
+
+  /**
+   * Generate JSON-LD schema for a location page
+   * @param {string} locationId - Location UUID
+   * @param {Object} data - Schema configuration
+   * @param {string} data.service_slug - Service identifier
+   * @param {string} data.service_name - Service display name
+   * @param {string} [data.service_description] - Service description
+   * @param {Object} data.business - Business details
+   * @param {Object} data.page - Page metadata
+   * @param {Array} [data.faqs] - FAQs for schema
+   * @param {Object} [data.options] - Schema generation options
+   */
+  generateSchema: (locationId, data) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/generate-schema`, data).then(res => res.data),
+  
+  /**
+   * Get stored schema for a location page
+   * @param {string} locationId - Location UUID
+   * @param {string} serviceSlug - Service identifier
+   */
+  getSchema: (locationId, serviceSlug) =>
+    portalApi.get(`/seo/location-pages/locations/${locationId}/schema/${serviceSlug}`).then(res => res.data),
+  
+  /**
+   * Validate a JSON-LD schema
+   * @param {Object} schema - Schema to validate
+   */
+  validateSchema: (schema) =>
+    portalApi.post('/seo/location-pages/schema/validate', schema).then(res => res.data),
+  
+  // ============================================================================
+  // GOOGLE INDEXING
+  // ============================================================================
+
+  /**
+   * Submit a location page URL for Google indexing
+   * @param {string} locationId - Location UUID
+   * @param {Object} data - Indexing request
+   * @param {string} data.project_id - Project UUID
+   * @param {string} data.url - URL to submit
+   * @param {string} [data.type] - 'URL_UPDATED' or 'URL_DELETED'
+   */
+  submitForIndexing: (locationId, data) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/submit-for-indexing`, data).then(res => res.data),
+  
+  /**
+   * Submit multiple location page URLs for Google indexing
+   * @param {Object} data - Bulk indexing request
+   * @param {string} data.project_id - Project UUID
+   * @param {string[]} data.urls - URLs to submit
+   * @param {string} [data.type] - 'URL_UPDATED' or 'URL_DELETED'
+   */
+  bulkSubmitForIndexing: (data) =>
+    portalApi.post('/seo/location-pages/bulk-submit-for-indexing', data).then(res => res.data),
+  
+  /**
+   * Get remaining indexing quota for today
+   * @param {string} projectId - Project UUID
+   */
+  getIndexingQuota: (projectId) =>
+    portalApi.get('/seo/location-pages/indexing-quota', { params: { project_id: projectId } }).then(res => res.data),
+  
+  // ============================================================================
+  // COMPETITOR ANALYSIS
+  // ============================================================================
+
+  /**
+   * Analyze competitors for a location page
+   * @param {string} locationId - Location UUID
+   * @param {Object} data - Analysis request
+   * @param {string} data.project_id - Project UUID
+   * @param {string} data.service_name - Service name to analyze
+   * @param {string} [data.our_url] - Our page URL to exclude from results
+   */
+  analyzeCompetitors: (locationId, data) =>
+    portalApi.post(`/seo/location-pages/locations/${locationId}/analyze-competitors`, data).then(res => res.data),
+  
+  /**
+   * Get stored competitor analysis for a location
+   * @param {string} locationId - Location UUID
+   * @param {string} service - Service name
+   */
+  getCompetitorAnalysis: (locationId, service) =>
+    portalApi.get(`/seo/location-pages/locations/${locationId}/competitor-analysis`, { params: { service } }).then(res => res.data),
+  
+  // ============================================================================
+  // ROI ATTRIBUTION
+  // ============================================================================
+
+  /**
+   * Track a conversion from a location page
+   * @param {Object} data - Conversion data
+   * @param {string} data.project_id - Project UUID
+   * @param {string} [data.location_id] - Location UUID (optional, will be inferred from URL)
+   * @param {string} data.url - The URL that converted
+   * @param {string} data.conversion_type - 'lead' | 'call' | 'form' | 'chat' | 'booking' | 'purchase'
+   * @param {number} [data.value] - Conversion value
+   * @param {string} [data.source] - Traffic source
+   * @param {string} [data.medium] - Traffic medium
+   * @param {Object} [data.metadata] - Additional metadata
+   */
+  trackConversion: (data) =>
+    portalApi.post('/seo/location-pages/conversions/track', data).then(res => res.data),
+  
+  /**
+   * Get ROI summary for a location
+   * @param {string} locationId - Location UUID
+   * @param {string} [period] - '7d' | '30d' | '90d' | '1y'
+   */
+  getLocationROI: (locationId, period = '30d') =>
+    portalApi.get(`/seo/location-pages/locations/${locationId}/roi`, { params: { period } }).then(res => res.data),
+  
+  /**
+   * Get project-wide ROI dashboard
+   * @param {string} projectId - Project UUID
+   * @param {string} [period] - '7d' | '30d' | '90d' | '1y'
+   */
+  getProjectROIDashboard: (projectId, period = '30d') =>
+    portalApi.get('/seo/location-pages/roi-dashboard', { params: { project_id: projectId, period } }).then(res => res.data),
+}
+
+// ============================================================================
+// Trends API - Google Trends / Sonor trending topics
+// ============================================================================
+
+export const trendsApi = {
+  /**
+   * Get trending topics feed
+   * @param {Object} params - Query params
+   * @param {string} [params.geo] - Geo code (e.g., 'US')
+   * @param {string} [params.type] - 'realtime' | 'daily'
+   * @param {number} [params.category_id] - Google Trends category ID
+   * @param {number} [params.limit] - Max results
+   * @param {number} [params.offset] - Pagination offset
+   */
+  getFeed: (params = {}) =>
+    portalApi.get('/trends/feed', { params }).then(res => res.data),
+  
+  /**
+   * Get daily trends for a specific date
+   * @param {Object} params - Query params
+   * @param {string} params.geo - Geo code (e.g., 'US')
+   * @param {string} params.date - Date in YYYY-MM-DD format
+   * @param {number} [params.category_id] - Google Trends category ID
+   */
+  getDaily: (params) =>
+    portalApi.get('/trends/daily', { params }).then(res => res.data),
+  
+  /**
+   * Get a single trend signal by ID
+   * @param {string} id - Trend signal ID
+   */
+  getSignal: (id) =>
+    portalApi.get(`/trends/${id}`).then(res => res.data),
+  
+  /**
+   * Trigger trending topics fetch (admin only)
+   * @param {Object} data - { geo, category_id }
+   */
+  triggerTrending: (data) =>
+    portalApi.post('/trends/jobs/trending', data).then(res => res.data),
+  
+  /**
+   * Trigger daily trends fetch (admin only)
+   * @param {Object} data - { geo, date, category_id }
+   */
+  triggerDaily: (data) =>
+    portalApi.post('/trends/jobs/daily', data).then(res => res.data),
+  
+  /**
+   * Trigger stale trends cleanup (admin only)
+   * @param {Object} data - { max_age_hours }
+   */
+  triggerPurge: (data) =>
+    portalApi.post('/trends/jobs/purge-stale', data).then(res => res.data),
 }
 
 // ============================================================================

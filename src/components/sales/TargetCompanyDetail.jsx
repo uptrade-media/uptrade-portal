@@ -29,7 +29,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import useCrmStore from '@/lib/crm-store'
+import { 
+  useClaimTargetCompany, 
+  useUnclaimTargetCompany 
+} from '@/lib/hooks'
 import { toast } from 'sonner'
 
 // Score to label mapping
@@ -47,12 +50,10 @@ export default function TargetCompanyDetail({ company, onClose }) {
   const [pitchAnglesOpen, setPitchAnglesOpen] = useState(true)
   const [signalsOpen, setSignalsOpen] = useState(false)
   
-  const { 
-    claimTargetCompany, 
-    unclaimTargetCompany, 
-    getCallPrep, 
-    callPrepLoading 
-  } = useCrmStore()
+  // Mutations
+  const claimMutation = useClaimTargetCompany()
+  const unclaimMutation = useUnclaimTargetCompany()
+  const callPrepLoading = false // TODO: Add when getCallPrep hook is ready
 
   if (!company) return null
 
@@ -68,7 +69,7 @@ export default function TargetCompanyDetail({ company, onClose }) {
 
   const handleClaim = async () => {
     try {
-      await claimTargetCompany(company.id)
+      await claimMutation.mutateAsync({ id: company.id })
       toast.success('Company claimed')
     } catch (err) {
       toast.error('Failed to claim company')
@@ -77,7 +78,7 @@ export default function TargetCompanyDetail({ company, onClose }) {
 
   const handleUnclaim = async () => {
     try {
-      await unclaimTargetCompany(company.id)
+      await unclaimMutation.mutateAsync({ id: company.id })
       toast.success('Company unclaimed')
     } catch (err) {
       toast.error('Failed to unclaim company')
@@ -86,8 +87,8 @@ export default function TargetCompanyDetail({ company, onClose }) {
 
   const handleGenerateCallPrep = async () => {
     try {
-      await getCallPrep(company.id, true)
-      toast.success('Call prep generated')
+      // TODO: Add getCallPrep hook when CRM is fully migrated
+      toast.info('Call prep generation coming soon')
     } catch (err) {
       toast.error('Failed to generate call prep')
     }

@@ -1,6 +1,7 @@
 // src/components/seo/SEOTrends.jsx
 // Shows ranking history, CWV trends, and traffic patterns
-import { useEffect, useState } from 'react'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -16,31 +17,22 @@ import {
   Loader2,
   Calendar
 } from 'lucide-react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useSeoRankingHistory, useSeoCWV } from '@/hooks/seo'
 import { cn } from '@/lib/utils'
 
 export default function SEOTrends({ site, projectId, onViewDetails }) {
-  const { 
-    rankingHistory,
-    rankingTrends,
-    rankingHistoryLoading,
-    fetchRankingHistory,
-    cwvSummary,
-    cwvLoading,
-    fetchCwvSummary
-  } = useSeoStore()
-
-  const [activeTab, setActiveTab] = useState('rankings')
-
   // Use projectId directly (new architecture) or fallback to site.id (legacy)
   const siteId = projectId || site?.id
 
-  useEffect(() => {
-    if (siteId) {
-      fetchRankingHistory(siteId, null, { limit: 30 })
-      fetchCwvSummary(siteId)
-    }
-  }, [siteId])
+  // React Query hooks - auto-fetch on mount
+  const { data: rankingData, isLoading: rankingHistoryLoading } = useSeoRankingHistory(siteId, null, { limit: 30 })
+  const { data: cwvSummary, isLoading: cwvLoading } = useSeoCWV(siteId)
+
+  // Extract data
+  const rankingHistory = rankingData?.history || rankingData || []
+  const rankingTrends = rankingData?.trends || {}
+
+  const [activeTab, setActiveTab] = useState('rankings')
 
   return (
     <Card>

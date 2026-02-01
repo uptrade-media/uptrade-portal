@@ -43,9 +43,10 @@ function PagesCard({ pages = [], site = {}, onViewAll }) {
 }
 
 function OpportunitiesCard({ opportunities = [], onViewAll }) {
-  const openOpportunities = opportunities.filter(o => o.status === 'open')
-  const critical = opportunities.filter(o => o.priority === 'critical').length
-  const high = opportunities.filter(o => o.priority === 'high').length
+  const list = Array.isArray(opportunities) ? opportunities : []
+  const openOpportunities = list.filter(o => o.status === 'open')
+  const critical = list.filter(o => o.priority === 'critical').length
+  const high = list.filter(o => o.priority === 'high').length
 
   return (
     <Card>
@@ -77,9 +78,9 @@ function OpportunitiesCard({ opportunities = [], onViewAll }) {
   )
 }
 
-function GSCConnectionCard({ site = {} }) {
-  // Support both old (gsc_connected_at) and new (gscConnected) API response format
-  const isConnected = !!site?.gscConnected || !!site?.gsc_connected_at
+function GSCConnectionCard({ site = {}, gscConnected: gscConnectedProp }) {
+  // Prefer explicit gscConnected from overview API when passed; else site fields (support old + new formats)
+  const isConnected = gscConnectedProp !== undefined ? !!gscConnectedProp : (!!site?.gscConnected || !!site?.gsc_connected_at)
 
   return (
     <Card>
@@ -118,12 +119,12 @@ function GSCConnectionCard({ site = {} }) {
   )
 }
 
-export default function StatusCards({ pages, opportunities, site, onViewPages, onViewOpportunities }) {
+export default function StatusCards({ pages, opportunities, site, gscConnected, onViewPages, onViewOpportunities }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <PagesCard pages={pages} site={site} onViewAll={onViewPages} />
       <OpportunitiesCard opportunities={opportunities} onViewAll={onViewOpportunities} />
-      <GSCConnectionCard site={site} />
+      <GSCConnectionCard site={site} gscConnected={gscConnected} />
     </div>
   )
 }

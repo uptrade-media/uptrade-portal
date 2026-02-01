@@ -1,23 +1,21 @@
 /**
  * TimeTrackingPanel - Time tracking with timer, manual entries, and summaries
+ * Migrated to React Query hooks
  */
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { 
-  Plus, Play, Pause, Clock, Calendar, DollarSign, FolderKanban,
+  Plus, Play, Pause, Clock, DollarSign, FolderKanban,
   MoreVertical, Edit, Trash2, Loader2, Timer, TrendingUp
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card'
-import { Badge } from '../ui/badge'
-import { Progress } from '../ui/progress'
+import { Card, CardContent } from '../ui/card'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from '../ui/dialog'
 import { Label } from '../ui/label'
-import { Textarea } from '../ui/textarea'
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem
 } from '../ui/select'
@@ -28,7 +26,15 @@ import {
 import EmptyState from '../EmptyState'
 import ConfirmDialog from '../ConfirmDialog'
 
-import useProjectsStore from '../../lib/projects-store'
+import {
+  useTimeEntries,
+  useProjectTimeSummary,
+  useCreateTimeEntry,
+  useUpdateTimeEntry,
+  useDeleteTimeEntry,
+  useStartProjectTimer,
+  useStopProjectTimer,
+} from '@/lib/hooks'
 
 const formatDuration = (minutes) => {
   if (!minutes) return '0h 0m'
@@ -47,20 +53,6 @@ const formatDate = (date) => {
 }
 
 const TimeTrackingPanel = ({ projects }) => {
-  const {
-    timeEntries,
-    activeTimer,
-    isLoading,
-    fetchTimeEntries,
-    createTimeEntry,
-    updateTimeEntry,
-    deleteTimeEntry,
-    startTimer,
-    stopTimer,
-    getTimeSummary,
-  } = useProjectsStore()
-
-  // UI State
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [timerDescription, setTimerDescription] = useState('')
   const [timerElapsed, setTimerElapsed] = useState(0)
@@ -68,9 +60,7 @@ const TimeTrackingPanel = ({ projects }) => {
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialog, setDeleteDialog] = useState({ open: false, entry: null })
   const [selectedEntry, setSelectedEntry] = useState(null)
-  const [summary, setSummary] = useState(null)
 
-  // Form state
   const [formData, setFormData] = useState({
     projectId: '',
     description: '',
@@ -79,14 +69,33 @@ const TimeTrackingPanel = ({ projects }) => {
     date: new Date().toISOString().split('T')[0],
   })
 
-  // Timer tick effect
+  const { data: timeEntriesData, isLoading } = useTimeEntries(selectedProjectId || null)
+  const timeEntriesRaw = Array.isArray(timeEntriesData) ? timeEntriesData : (timeEntriesData?.timeEntries ?? timeEntriesData ?? [])
+  const timeEntries = Array.isArray(timeEntriesRaw) ? timeEntriesRaw : []
+
+  const activeTimer = timeEntries.find(
+    (e) => e.is_running || e.isRunning || (e.started_at && !e.stopped_at)
+  ) || null
+
+  const { data: summaryRaw } = useProjectTimeSummary(selectedProjectId || null)
+  const summary = summaryRaw ? {
+    totalMinutes: (summaryRaw.totalHours || 0) * 60,
+    totalBillable: summaryRaw.totalAmount || 0,
+    entryCount: timeEntries.filter((e) => e.stopped_at || !e.started_at).length,
+    thisWeek: 0,
+  } : null
+
+  const createTimeEntryMutation = useCreateTimeEntry()
+  const updateTimeEntryMutation = useUpdateTimeEntry()
+  const deleteTimeEntryMutation = useDeleteTimeEntry()
+  const startTimerMutation = useStartProjectTimer()
+  const stopTimerMutation = useStopProjectTimer()
+
   useEffect(() => {
     let interval
     if (activeTimer) {
-      // Calculate initial elapsed time
       const startTime = new Date(activeTimer.started_at).getTime()
       setTimerElapsed(Math.floor((Date.now() - startTime) / 1000))
-      
       interval = setInterval(() => {
         setTimerElapsed(Math.floor((Date.now() - startTime) / 1000))
       }, 1000)
@@ -96,20 +105,6 @@ const TimeTrackingPanel = ({ projects }) => {
     return () => clearInterval(interval)
   }, [activeTimer])
 
-  // Load time entries when project changes
-  useEffect(() => {
-    if (selectedProjectId) {
-      fetchTimeEntries(selectedProjectId)
-      loadSummary()
-    }
-  }, [selectedProjectId])
-
-  const loadSummary = async () => {
-    if (!selectedProjectId) return
-    const data = await getTimeSummary(selectedProjectId)
-    setSummary(data)
-  }
-
   // Format elapsed time
   const formatElapsed = (seconds) => {
     const hrs = Math.floor(seconds / 3600)
@@ -118,15 +113,16 @@ const TimeTrackingPanel = ({ projects }) => {
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  // Timer handlers
   const handleStartTimer = async () => {
     if (!selectedProjectId) {
       toast.error('Select a project first')
       return
     }
-    
     try {
-      await startTimer(selectedProjectId, timerDescription)
+      await startTimerMutation.mutateAsync({
+        projectId: selectedProjectId,
+        description: timerDescription,
+      })
       toast.success('Timer started')
     } catch (err) {
       toast.error(err.message || 'Failed to start timer')
@@ -135,12 +131,14 @@ const TimeTrackingPanel = ({ projects }) => {
 
   const handleStopTimer = async () => {
     if (!activeTimer) return
-    
     try {
-      await stopTimer(activeTimer.project_id)
+      await stopTimerMutation.mutateAsync({
+        entryId: activeTimer.id,
+        projectId: activeTimer.project_id,
+        description: '',
+      })
       toast.success('Timer stopped')
       setTimerDescription('')
-      loadSummary()
     } catch (err) {
       toast.error(err.message || 'Failed to stop timer')
     }
@@ -160,18 +158,19 @@ const TimeTrackingPanel = ({ projects }) => {
   const handleCreate = async (e) => {
     e.preventDefault()
     if (!formData.projectId || !formData.durationMinutes) return
-    
     try {
-      await createTimeEntry(formData.projectId, {
-        description: formData.description,
-        durationMinutes: parseInt(formData.durationMinutes),
-        hourlyRate: formData.hourlyRate ? parseFloat(formData.hourlyRate) : null,
-        date: formData.date,
+      await createTimeEntryMutation.mutateAsync({
+        projectId: formData.projectId,
+        data: {
+          description: formData.description || 'Manual entry',
+          date: formData.date,
+          hours: parseInt(formData.durationMinutes, 10) / 60,
+          hourlyRate: formData.hourlyRate ? parseFloat(formData.hourlyRate) : undefined,
+        },
       })
       toast.success('Time entry added')
       setCreateDialogOpen(false)
       resetForm()
-      loadSummary()
     } catch (err) {
       toast.error(err.message || 'Failed to add time entry')
     }
@@ -180,17 +179,19 @@ const TimeTrackingPanel = ({ projects }) => {
   const handleEdit = async (e) => {
     e.preventDefault()
     if (!selectedEntry) return
-    
     try {
-      await updateTimeEntry(selectedEntry.project_id, selectedEntry.id, {
-        description: formData.description,
-        durationMinutes: parseInt(formData.durationMinutes),
-        hourlyRate: formData.hourlyRate ? parseFloat(formData.hourlyRate) : null,
+      await updateTimeEntryMutation.mutateAsync({
+        id: selectedEntry.id,
+        projectId: selectedEntry.project_id,
+        updates: {
+          description: formData.description,
+          hours: parseInt(formData.durationMinutes, 10) / 60,
+          hourlyRate: formData.hourlyRate ? parseFloat(formData.hourlyRate) : undefined,
+        },
       })
       toast.success('Time entry updated')
       setEditDialogOpen(false)
       resetForm()
-      loadSummary()
     } catch (err) {
       toast.error(err.message || 'Failed to update time entry')
     }
@@ -198,12 +199,13 @@ const TimeTrackingPanel = ({ projects }) => {
 
   const handleDelete = async () => {
     if (!deleteDialog.entry) return
-    
     try {
-      await deleteTimeEntry(deleteDialog.entry.project_id, deleteDialog.entry.id)
+      await deleteTimeEntryMutation.mutateAsync({
+        id: deleteDialog.entry.id,
+        projectId: deleteDialog.entry.project_id,
+      })
       toast.success('Time entry deleted')
       setDeleteDialog({ open: false, entry: null })
-      loadSummary()
     } catch (err) {
       toast.error(err.message || 'Failed to delete time entry')
     }
@@ -211,12 +213,13 @@ const TimeTrackingPanel = ({ projects }) => {
 
   const openEditDialog = (entry) => {
     setSelectedEntry(entry)
+    const mins = entry.duration_minutes ?? (entry.hours ? Math.round(entry.hours * 60) : 0)
     setFormData({
       projectId: entry.project_id,
       description: entry.description || '',
-      durationMinutes: entry.duration_minutes?.toString() || '',
-      hourlyRate: entry.hourly_rate?.toString() || '',
-      date: entry.created_at?.split('T')[0] || '',
+      durationMinutes: mins.toString(),
+      hourlyRate: (entry.hourly_rate ?? entry.hourlyRate)?.toString() || '',
+      date: (entry.date || entry.created_at)?.split('T')[0] || '',
     })
     setEditDialogOpen(true)
   }
@@ -404,20 +407,20 @@ const TimeTrackingPanel = ({ projects }) => {
                     {entry.description || 'No description'}
                   </p>
                   <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
-                    <span>{formatDate(entry.created_at)}</span>
-                    {entry.hourly_rate && (
-                      <span>${entry.hourly_rate}/hr</span>
+                    <span>{formatDate(entry.date || entry.created_at)}</span>
+                    {(entry.hourly_rate ?? entry.hourlyRate) && (
+                      <span>${entry.hourly_rate ?? entry.hourlyRate}/hr</span>
                     )}
                   </div>
                 </div>
-                
+
                 <div className="text-right">
                   <p className="font-mono font-semibold">
-                    {formatDuration(entry.duration_minutes)}
+                    {formatDuration(entry.duration_minutes ?? (entry.hours ? entry.hours * 60 : 0))}
                   </p>
-                  {entry.hourly_rate && entry.duration_minutes && (
+                  {((entry.hourly_rate ?? entry.hourlyRate) && (entry.hours ?? entry.duration_minutes)) && (
                     <p className="text-sm text-green-600">
-                      ${((entry.duration_minutes / 60) * entry.hourly_rate).toFixed(2)}
+                      ${((entry.hours ?? entry.duration_minutes / 60) * (entry.hourly_rate ?? entry.hourlyRate ?? 0)).toFixed(2)}
                     </p>
                   )}
                 </div>

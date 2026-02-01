@@ -25,6 +25,7 @@ import {
   ThumbsUp,
   BarChart2,
 } from 'lucide-react';
+import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -34,7 +35,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { useBroadcastStore } from '@/stores/broadcastStore';
+import { 
+  useDeleteBroadcastPost,
+  usePublishBroadcastPost,
+  useCreateBroadcastPost,
+} from '@/lib/hooks';
+import useAuthStore from '@/lib/auth-store';
 import { PlatformIcon } from './PlatformIcon';
 
 // Platform-specific colors with dark theme support
@@ -85,19 +91,18 @@ const STATUS_CONFIG = {
 };
 
 function PostCard({ post, onEdit }) {
-  const { 
-    deletePost, 
-    duplicatePost, 
-    approvePost, 
-    rejectPost, 
-    publishPost,
-    retryPost,
-  } = useBroadcastStore();
+  const { currentProject } = useAuthStore();
+  const projectId = currentProject?.id;
+  
+  const deletePostMutation = useDeleteBroadcastPost();
+  const publishPostMutation = usePublishBroadcastPost();
+  const duplicatePostMutation = useCreateBroadcastPost();
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  
+  const isLoading = deletePostMutation.isPending || publishPostMutation.isPending || duplicatePostMutation.isPending;
 
   const statusConfig = STATUS_CONFIG[post.status] || STATUS_CONFIG.draft;
   const StatusIcon = statusConfig.icon;
@@ -112,33 +117,40 @@ function PostCard({ post, onEdit }) {
   const hasMetrics = metrics.likes || metrics.comments || metrics.shares;
 
   const handleAction = async (action) => {
-    setIsLoading(true);
-    try {
-      switch (action) {
-        case 'approve':
-          await approvePost(post.id);
-          break;
-        case 'publish':
-          await publishPost(post.id);
-          break;
-        case 'duplicate':
-          await duplicatePost(post.id);
-          break;
-        case 'delete':
-          await deletePost(post.id);
-          setShowDeleteDialog(false);
-          break;
-        case 'reject':
-          await rejectPost(post.id, rejectReason);
-          setShowRejectDialog(false);
-          setRejectReason('');
-          break;
-        case 'retry':
-          await retryPost(post.id);
-          break;
-      }
-    } finally {
-      setIsLoading(false);
+    switch (action) {
+      case 'approve':
+        // TODO: Add approve mutation when available
+        console.log('Approve post:', post.id);
+        break;
+      case 'publish':
+        publishPostMutation.mutate({ id: post.id, projectId });
+        break;
+      case 'duplicate':
+        duplicatePostMutation.mutate({ 
+          projectId, 
+          data: { 
+            content: post.content, 
+            platforms: post.platforms, 
+            hashtags: post.hashtags,
+            mediaUrls: post.mediaUrls,
+          } 
+        });
+        break;
+      case 'delete':
+        deletePostMutation.mutate({ id: post.id, projectId }, {
+          onSuccess: () => setShowDeleteDialog(false),
+        });
+        break;
+      case 'reject':
+        // TODO: Add reject mutation when available
+        console.log('Reject post:', post.id, rejectReason);
+        setShowRejectDialog(false);
+        setRejectReason('');
+        break;
+      case 'retry':
+        // TODO: Add retry mutation when available
+        console.log('Retry post:', post.id);
+        break;
     }
   };
 
@@ -531,19 +543,13 @@ function PostListItem({ post, onEdit }) {
 export function PostsList({ posts, viewMode = 'grid', onEdit, onCreatePost }) {
   if (posts.length === 0) {
     return (
-      <div className="flex h-80 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[var(--glass-border)] bg-[var(--surface-secondary)]/50">
-        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand-primary)]/20 to-[var(--brand-secondary)]/20">
-          <FileText className="h-8 w-8 text-[var(--brand-primary)]" />
-        </div>
-        <h3 className="mb-1 text-lg font-semibold text-[var(--text-primary)]">No posts yet</h3>
-        <p className="mb-4 text-sm text-[var(--text-tertiary)]">Create your first post to get started</p>
-        <Button 
-          onClick={() => onCreatePost?.({})}
-          className="bg-gradient-to-r from-[var(--brand-primary)] to-[var(--brand-secondary)] text-white hover:opacity-90"
-        >
-          Create Your First Post
-        </Button>
-      </div>
+      <EmptyState
+        icon={FileText}
+        title="No posts yet"
+        description="Create your first post to get started"
+        actionLabel={onCreatePost ? 'Create Your First Post' : undefined}
+        onAction={onCreatePost ? () => onCreatePost({}) : undefined}
+      />
     );
   }
 

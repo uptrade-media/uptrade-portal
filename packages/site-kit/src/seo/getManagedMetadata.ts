@@ -57,8 +57,8 @@ export async function getManagedMetadata(
   }
 
   // Description
-  if (pageData.managed_description) {
-    metadata.description = pageData.managed_description
+  if (pageData.managed_meta_description || pageData.managed_description) {
+    metadata.description = pageData.managed_meta_description || pageData.managed_description
   } else if (fallback.description) {
     metadata.description = fallback.description
   }
@@ -85,7 +85,7 @@ export async function getManagedMetadata(
 
   // Open Graph
   const ogTitle = pageData.managed_og_title || pageData.managed_title
-  const ogDescription = pageData.managed_og_description || pageData.managed_description
+  const ogDescription = pageData.managed_og_description || pageData.managed_meta_description || pageData.managed_description
   const ogImage = pageData.managed_og_image
 
   if (ogTitle || ogDescription || ogImage) {

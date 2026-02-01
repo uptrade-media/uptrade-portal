@@ -1,69 +1,45 @@
 /**
  * useProspectTimeline - Hook for fetching and managing prospect timeline
- * Integrates with CRM store for unified timeline and attribution data
+ * Uses React Query for automatic caching and background refresh
  */
-import { useEffect, useCallback } from 'react'
-import { useCrmStore } from '@/lib/crm-store'
+import { useCallback } from 'react'
+import { useTimeline, useAttribution } from '@/lib/hooks'
 
 export function useProspectTimeline(prospectId, options = {}) {
   const {
-    autoFetch = true,
-    includeAttribution = true
+    includeAttribution = true,
+    ...queryOptions
   } = options
   
   const {
-    timeline,
-    timelineLoading,
-    timelineError,
-    timelineHasMore,
-    attribution,
-    attributionLoading,
-    fetchTimeline,
-    loadMoreTimeline,
-    fetchAttribution,
-    clearTimeline
-  } = useCrmStore()
-  
-  // Initial fetch when prospect changes
-  useEffect(() => {
-    if (autoFetch && prospectId) {
-      clearTimeline()
-      fetchTimeline(prospectId)
-      
-      if (includeAttribution) {
-        fetchAttribution(prospectId)
-      }
-    }
-    
-    return () => {
-      clearTimeline()
-    }
-  }, [prospectId, autoFetch, includeAttribution])
-  
-  // Load more handler
-  const handleLoadMore = useCallback(() => {
-    if (prospectId && !timelineLoading && timelineHasMore) {
-      loadMoreTimeline(prospectId)
-    }
-  }, [prospectId, timelineLoading, timelineHasMore])
-  
-  // Refresh timeline
-  const refresh = useCallback(() => {
-    if (prospectId) {
-      clearTimeline()
-      fetchTimeline(prospectId)
-      if (includeAttribution) {
-        fetchAttribution(prospectId)
-      }
-    }
-  }, [prospectId, includeAttribution])
-  
-  return {
-    events: timeline,
+    data: timeline,
     isLoading: timelineLoading,
     error: timelineError,
-    hasMore: timelineHasMore,
-    onLoadMore: handleLoadMore,
+    refetch: refetchTimeline
+  } = useTimeline(prospectId, { enabled: !!prospectId, ...queryOptions })
+  
+  const {
+    data: attribution,
+    isLoading: attributionLoading,
+    refetch: refetchAttribution
+  } = useAttribution(prospectId, { enabled: !!prospectId && includeAttribution, ...queryOptions })
+  
+  // Refresh both timeline and attribution
+  const refresh = useCallback(() => {
+    if (prospectId) {
+      refetchTimeline()
+      if (includeAttribution) {
+        refetchAttribution()
+      }
+    }
+  }, [prospectId, includeAttribution, refetchTimeline, refetchAttribution])
+  
+  return {
+    events: timeline?.events || [],
+    isLoading: timelineLoading,
+    error: timelineError,
+    hasMore: false, // Pagination can be added later if needed
+    onLoadMore: () => {}, // Placeholder for backward compatibility
     attribution,
     isLoadingAttribution: attributionLoading,
     refresh

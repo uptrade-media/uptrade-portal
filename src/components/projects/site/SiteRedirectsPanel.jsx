@@ -10,7 +10,11 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { useSiteManagementStore } from '@/lib/site-management-store'
+import { 
+  useCreateSiteRedirect, 
+  useUpdateSiteRedirect, 
+  useDeleteSiteRedirect 
+} from '@/lib/hooks'
 import {
   Dialog,
   DialogContent,
@@ -61,7 +65,11 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(null)
-  const store = useSiteManagementStore()
+  
+  // React Query mutations
+  const createRedirectMutation = useCreateSiteRedirect()
+  const updateRedirectMutation = useUpdateSiteRedirect()
+  const deleteRedirectMutation = useDeleteSiteRedirect()
   
   const filteredRedirects = redirects.filter(r => 
     r.source_path?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -76,7 +84,7 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
   const handleDelete = async (redirectId) => {
     setIsDeleting(redirectId)
     try {
-      await store.deleteRedirect(redirectId)
+      await deleteRedirectMutation.mutateAsync({ id: redirectId, projectId: project.id })
       toast.success('Redirect deleted')
     } catch (error) {
       toast.error('Failed to delete redirect')
@@ -87,7 +95,11 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
   
   const handleToggleActive = async (redirect, checked) => {
     try {
-      await store.updateRedirect(redirect.id, { is_active: checked })
+      await updateRedirectMutation.mutateAsync({ 
+        id: redirect.id, 
+        projectId: project.id, 
+        data: { is_active: checked } 
+      })
       toast.success(checked ? 'Redirect activated' : 'Redirect deactivated')
     } catch (error) {
       toast.error('Failed to update redirect')
@@ -117,7 +129,7 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
           open={isCreateOpen}
           onOpenChange={setIsCreateOpen}
           onSubmit={async (data) => {
-            await store.createRedirect(data)
+            await createRedirectMutation.mutateAsync({ projectId: project.id, data })
             toast.success('Redirect created')
             setIsCreateOpen(false)
           }}
@@ -127,7 +139,10 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
           open={isImportOpen}
           onOpenChange={setIsImportOpen}
           onSubmit={async (csvData) => {
-            await store.importRedirects(csvData)
+            // Import redirects one by one
+            for (const data of csvData) {
+              await createRedirectMutation.mutateAsync({ projectId: project.id, data })
+            }
             toast.success('Redirects imported')
             setIsImportOpen(false)
           }}
@@ -260,7 +275,7 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
         open={isCreateOpen}
         onOpenChange={setIsCreateOpen}
         onSubmit={async (data) => {
-          await store.createRedirect(data)
+          await createRedirectMutation.mutateAsync({ projectId: project.id, data })
           toast.success('Redirect created')
           setIsCreateOpen(false)
         }}
@@ -272,7 +287,11 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
         open={!!editingRedirect}
         onOpenChange={(open) => !open && setEditingRedirect(null)}
         onSubmit={async (data) => {
-          await store.updateRedirect(editingRedirect.id, data)
+          await updateRedirectMutation.mutateAsync({ 
+            id: editingRedirect.id, 
+            projectId: project.id, 
+            data 
+          })
           toast.success('Redirect updated')
           setEditingRedirect(null)
         }}
@@ -287,7 +306,10 @@ export default function SiteRedirectsPanel({ project, redirects = [] }) {
         open={isImportOpen}
         onOpenChange={setIsImportOpen}
         onSubmit={async (csvData) => {
-          await store.importRedirects(csvData)
+          // Import redirects one by one
+          for (const data of csvData) {
+            await createRedirectMutation.mutateAsync({ projectId: project.id, data })
+          }
           toast.success('Redirects imported')
           setIsImportOpen(false)
         }}

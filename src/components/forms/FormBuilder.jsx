@@ -108,7 +108,9 @@ import {
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { useCommerceStore } from '@/lib/commerce-store'
+import { useCommerceOfferings, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
+import { engageApi } from '@/lib/portal-api'
 
 // =============================================================================
 // CONSTANTS
@@ -418,48 +420,41 @@ function FieldWithDropZones({ field, fieldIndex, children, onSideDrop }) {
     data: { type: 'side-drop', side: 'right', targetFieldId: field.id, fieldIndex }
   })
   
-  // Only show drop zones for full-width fields (can be split)
-  const canSplit = field.width === 'full' || !field.width
-  
   return (
     <div className="relative group/dropzone">
-      {/* Left Drop Zone - only capture events during drag */}
-      {canSplit && (
-        <div
-          ref={setLeftRef}
-          className={cn(
-            "absolute left-0 top-0 bottom-0 w-1/2 z-10 transition-all duration-200 pointer-events-none",
-            isOverLeft && "opacity-100 bg-[var(--brand-primary)]/10 border-2 border-dashed border-[var(--brand-primary)] rounded-l-xl"
-          )}
-        >
-          {isOverLeft && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="bg-[var(--brand-primary)] text-white text-xs px-2 py-1 rounded-lg shadow-lg">
-                Drop here (left half)
-              </div>
+      {/* Left Drop Zone */}
+      <div
+        ref={setLeftRef}
+        className={cn(
+          "absolute left-0 top-0 bottom-0 w-1/2 z-10 transition-all duration-200 pointer-events-none",
+          isOverLeft && "opacity-100 bg-[var(--brand-primary)]/10 border-2 border-dashed border-[var(--brand-primary)] rounded-l-xl"
+        )}
+      >
+        {isOverLeft && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="bg-[var(--brand-primary)] text-white text-xs px-2 py-1 rounded-lg shadow-lg">
+              Drop here (left half)
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
       
-      {/* Right Drop Zone - only capture events during drag */}
-      {canSplit && (
-        <div
-          ref={setRightRef}
-          className={cn(
-            "absolute right-0 top-0 bottom-0 w-1/2 z-10 transition-all duration-200 pointer-events-none",
-            isOverRight && "opacity-100 bg-[var(--brand-secondary)]/10 border-2 border-dashed border-[var(--brand-secondary)] rounded-r-xl"
-          )}
-        >
-          {isOverRight && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="bg-[var(--brand-secondary)] text-white text-xs px-2 py-1 rounded-lg shadow-lg">
-                Drop here (right half)
-              </div>
+      {/* Right Drop Zone */}
+      <div
+        ref={setRightRef}
+        className={cn(
+          "absolute right-0 top-0 bottom-0 w-1/2 z-10 transition-all duration-200 pointer-events-none",
+          isOverRight && "opacity-100 bg-[var(--brand-secondary)]/10 border-2 border-dashed border-[var(--brand-secondary)] rounded-r-xl"
+        )}
+      >
+        {isOverRight && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="bg-[var(--brand-secondary)] text-white text-xs px-2 py-1 rounded-lg shadow-lg">
+              Drop here (right half)
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
       
       {/* The actual field */}
       {children}
@@ -726,9 +721,9 @@ function FieldPalette({ onAddField, onAddFieldGroup, onAISuggest, isCollapsed, o
   }
 
   return (
-    <div className="w-72 shrink-0 border-r border-[var(--glass-border)] bg-[var(--glass-bg)] flex flex-col">
+    <div className="w-72 shrink-0 border-r border-[var(--glass-border)] bg-[var(--glass-bg)] flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
+      <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand-primary)]/20 to-[var(--brand-secondary)]/20">
             <Plus className="h-4 w-4 text-[var(--brand-primary)]" />
@@ -741,7 +736,7 @@ function FieldPalette({ onAddField, onAddFieldGroup, onAISuggest, isCollapsed, o
       </div>
       
       {/* Field Categories */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto">
         <div className="p-3 space-y-2">
           {/* Quick Add Groups */}
           <div className="space-y-1">
@@ -827,10 +822,10 @@ function FieldPalette({ onAddField, onAddFieldGroup, onAISuggest, isCollapsed, o
             </div>
           ))}
         </div>
-      </ScrollArea>
+      </div>
       
       {/* AI Suggestion */}
-      <div className="p-3 border-t border-[var(--glass-border)]">
+      <div className="p-3 border-t border-[var(--glass-border)] shrink-0">
         <button 
           onClick={onAISuggest}
           className="w-full flex items-center gap-3 p-3 rounded-xl bg-gradient-to-r from-[var(--brand-primary)]/10 to-[var(--brand-secondary)]/10 border border-[var(--brand-primary)]/20 hover:border-[var(--brand-primary)]/40 transition-colors group"
@@ -1499,7 +1494,7 @@ function FormCanvas({ form, fields, selectedField, onSelect, onDelete, onDuplica
   })
   
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-[var(--surface-page)]">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--surface-page)]">
       {/* Canvas Header */}
       <div className="shrink-0 px-6 py-3 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-sm">
         <div className="flex items-center justify-between">
@@ -1640,7 +1635,7 @@ function FormCanvas({ form, fields, selectedField, onSelect, onDelete, onDuplica
       </div>
       
       {/* Live Form Preview Canvas */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto">
         <div 
           ref={setNodeRef}
           className={cn(
@@ -1771,7 +1766,7 @@ function FormCanvas({ form, fields, selectedField, onSelect, onDelete, onDuplica
             </div>
           </div>
         </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }
@@ -1894,6 +1889,8 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
         form_type: initialData.formType || initialData.form_type || 'prospect',
         submit_text: initialData.submitButtonText || initialData.submit_text || 'Submit',
         success_message: initialData.successMessage || initialData.success_message || 'Thank you for your submission!',
+        success_action: initialData.success_action || 'message',
+        success_engage_element_id: initialData.success_engage_element_id || null,
         is_active: initialData.isActive ?? initialData.is_active ?? true,
         project_id: initialData.projectId || initialData.project_id || projectId,
         offering_id: initialData.offering_id || null,
@@ -1908,6 +1905,8 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
       form_type: 'prospect',
       submit_text: 'Submit',
       success_message: 'Thank you for your submission!',
+      success_action: 'message',
+      success_engage_element_id: null,
       is_active: true,
       project_id: projectId,
       offering_id: null,
@@ -1919,10 +1918,28 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
   const { offerings, fetchOfferings } = useCommerceStore()
   const services = offerings.filter(o => o.type === 'service')
   
-  // Fetch services on mount
+  // Load engage elements for post-submit popup
+  const [engageElements, setEngageElements] = useState([])
+  const [loadingEngageElements, setLoadingEngageElements] = useState(false)
+  
+  // Fetch services and engage elements on mount
   useEffect(() => {
     if (projectId) {
       fetchOfferings(projectId, { type: 'service' })
+      
+      // Load engage elements (popups, nudges, etc.)
+      setLoadingEngageElements(true)
+      engageApi.getElements({ projectId })
+        .then(response => {
+          const data = response?.data || response || []
+          // Filter to active popups/nudges suitable for post-form display
+          const elements = (Array.isArray(data) ? data : []).filter(e => 
+            e.is_active && ['popup', 'nudge', 'toast', 'slide-in'].includes(e.element_type)
+          )
+          setEngageElements(elements)
+        })
+        .catch(err => console.error('Failed to load engage elements:', err))
+        .finally(() => setLoadingEngageElements(false))
     }
   }, [projectId, fetchOfferings])
   
@@ -2370,17 +2387,32 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
         step.fields.map((field, fieldIndex) => ({
           ...field,
           step: stepIndex,
-          sort_order: fieldIndex
+          sortOrder: fieldIndex,
+          fieldType: field.field_type,
+          isRequired: field.is_required,
+          helpText: field.help_text,
+          defaultValue: field.default_value,
         }))
       )
+      
+      // Format steps with stepNumber (required by API)
+      const formattedSteps = steps.map((step, index) => ({
+        stepNumber: index + 1,
+        title: step.name,
+        description: step.description || '',
+      }))
       
       await onSave?.({
         ...form,
         id: formId,
-        project_id: projectId,
         projectId: projectId,
         fields: allFields,
-        steps: steps.map(s => s.name)
+        steps: formattedSteps,
+        // Map form properties to camelCase for API
+        formType: form.form_type,
+        successMessage: form.success_message,
+        submitButtonText: form.submit_text,
+        isActive: form.is_active,
       })
       
       // Reset change tracking after successful save
@@ -2640,7 +2672,7 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
         {/* Main Content - 3 Column Layout */}
         <div className="flex-1 flex min-h-0">
           {/* Left Panel: Field Palette + Steps */}
-          <div className="flex flex-col border-r border-[var(--glass-border)] bg-[var(--glass-bg)]">
+          <div className="flex flex-col border-r border-[var(--glass-border)] bg-[var(--glass-bg)] min-h-0 overflow-hidden">
             {/* Steps (if multi-step) */}
             {steps.length > 1 && (
               <StepManager
@@ -2654,7 +2686,7 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
             )}
             
             {/* Field Palette */}
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 h-full overflow-hidden">
               <FieldPalette
                 onAddField={addField}
                 onAddFieldGroup={addFieldGroup}
@@ -2805,6 +2837,92 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
                   placeholder="Message shown after successful submission..."
                   className="bg-[var(--surface-page)] border-[var(--glass-border)] min-h-[80px]"
                 />
+              </div>
+              
+              {/* Post-Submit Action Section */}
+              <div className="space-y-3 p-4 rounded-lg bg-[var(--surface-page)] border border-[var(--glass-border)]">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-[var(--brand-primary)]" />
+                  <Label className="text-[var(--text-primary)] font-medium">Post-Submit Action</Label>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label className="text-xs text-[var(--text-secondary)]">What happens after submission?</Label>
+                  <Select
+                    value={form.success_action || 'message'}
+                    onValueChange={(v) => setForm(prev => ({ 
+                      ...prev, 
+                      success_action: v,
+                      // Clear engage element if not using it
+                      success_engage_element_id: v === 'engage_element' || v === 'both' ? prev.success_engage_element_id : null
+                    }))}
+                  >
+                    <SelectTrigger className="bg-[var(--surface-secondary)] border-[var(--glass-border)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="message">Show success message</SelectItem>
+                      <SelectItem value="redirect">Redirect to URL</SelectItem>
+                      <SelectItem value="engage_element">Show popup/nudge</SelectItem>
+                      <SelectItem value="both">Message + popup/nudge</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                {(form.success_action === 'engage_element' || form.success_action === 'both') && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-[var(--text-secondary)]">Select Engage Element</Label>
+                    <Select
+                      value={form.success_engage_element_id || 'none'}
+                      onValueChange={(v) => setForm(prev => ({ 
+                        ...prev, 
+                        success_engage_element_id: v === 'none' ? null : v 
+                      }))}
+                      disabled={loadingEngageElements}
+                    >
+                      <SelectTrigger className="bg-[var(--surface-secondary)] border-[var(--glass-border)]">
+                        <SelectValue placeholder={loadingEngageElements ? 'Loading...' : 'Select popup or nudge...'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None selected</SelectItem>
+                        {engageElements.length === 0 && !loadingEngageElements && (
+                          <div className="px-2 py-3 text-xs text-[var(--text-tertiary)] text-center">
+                            No active popups or nudges found.
+                            <br />
+                            <a href="/engage" className="text-[var(--brand-primary)] hover:underline">
+                              Create one in Engage →
+                            </a>
+                          </div>
+                        )}
+                        {engageElements.map(element => (
+                          <SelectItem key={element.id} value={element.id}>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-[10px] px-1">
+                                {element.element_type}
+                              </Badge>
+                              {element.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-[var(--text-tertiary)]">
+                      The selected popup or nudge will be shown after form submission
+                    </p>
+                  </div>
+                )}
+                
+                {form.success_action === 'redirect' && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-[var(--text-secondary)]">Redirect URL</Label>
+                    <Input
+                      value={form.redirect_url || ''}
+                      onChange={(e) => setForm(prev => ({ ...prev, redirect_url: e.target.value }))}
+                      placeholder="https://example.com/thank-you"
+                      className="bg-[var(--surface-secondary)] border-[var(--glass-border)]"
+                    />
+                  </div>
+                )}
               </div>
               
               <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface-page)] border border-[var(--glass-border)]">

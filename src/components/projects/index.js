@@ -8,7 +8,7 @@
  */
 
 // Main component
-export { default as ProjectsV2 } from './ProjectsV2'
+export { default as ProjectsV2 } from './ProjectsModule'
 
 // Panel components
 export { default as ProjectOverviewPanel } from './ProjectOverviewPanel'

@@ -1,5 +1,6 @@
 // src/components/affiliates/CreateConversionDialog.jsx
 // Dialog to manually record a conversion
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect } from 'react'
 import { Plus, DollarSign, Loader2 } from 'lucide-react'
@@ -24,12 +25,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import useAuthStore from '@/lib/auth-store'
-import useAffiliatesStore from '@/lib/affiliates-store'
+import { useAffiliateOffers, useRecordAffiliateConversion } from '@/lib/hooks'
 import { toast } from 'sonner'
 
 export default function CreateConversionDialog({ affiliateId, children }) {
   const { currentProject } = useAuthStore()
-  const { offers, createConversion, fetchOffers } = useAffiliatesStore()
+  // React Query hooks - auto-fetch offers when open
+  const { data: offers = [] } = useAffiliateOffers(currentProject?.id, affiliateId)
+  const createConversionMutation = useRecordAffiliateConversion()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -42,13 +45,7 @@ export default function CreateConversionDialog({ affiliateId, children }) {
     notes: '',
     conversion_date: new Date().toISOString().split('T')[0],
   })
-
-  // Fetch offers when dialog opens
-  useEffect(() => {
-    if (open && currentProject?.id && affiliateId) {
-      fetchOffers(currentProject.id, affiliateId)
-    }
-  }, [open, currentProject?.id, affiliateId, fetchOffers])
+  // React Query auto-fetches offers - no need for useEffect
 
   // Auto-fill payout when offer is selected
   useEffect(() => {
@@ -74,14 +71,17 @@ export default function CreateConversionDialog({ affiliateId, children }) {
 
     setIsSubmitting(true)
     try {
-      await createConversion(currentProject.id, {
-        affiliate_id: affiliateId,
-        offer_id: formData.offer_id || null,
-        conversion_value: formData.conversion_value ? parseFloat(formData.conversion_value) : null,
-        payout_amount: formData.payout_amount ? parseFloat(formData.payout_amount) : null,
-        notes: formData.notes || null,
-        conversion_date: formData.conversion_date,
-        status: 'approved',
+      await createConversionMutation.mutateAsync({
+        projectId: currentProject.id,
+        data: {
+          affiliate_id: affiliateId,
+          offer_id: formData.offer_id || null,
+          conversion_value: formData.conversion_value ? parseFloat(formData.conversion_value) : null,
+          payout_amount: formData.payout_amount ? parseFloat(formData.payout_amount) : null,
+          notes: formData.notes || null,
+          conversion_date: formData.conversion_date,
+          status: 'approved',
+        }
       })
       toast.success('Conversion recorded')
       setOpen(false)

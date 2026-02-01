@@ -20,6 +20,7 @@
  */
 import axios from 'axios'
 import { supabase } from './supabase-auth'
+import useAuthStore from './auth-store'
 
 // Signal API URL - AI brain for Echo, skills, knowledge
 const SIGNAL_API_URL = import.meta.env.VITE_SIGNAL_API_URL || 'https://signal.uptrademedia.com'
@@ -58,8 +59,7 @@ signalApi.interceptors.request.use(
       config.headers.Authorization = `Bearer ${session.access_token}`
     }
     
-    // Import auth store dynamically to avoid circular dependency
-    const { default: useAuthStore } = await import('./auth-store')
+    // Get auth state for organization/project context headers
     const state = useAuthStore.getState()
     
     // Add organization/project context headers
@@ -119,6 +119,11 @@ async function getAuthHeaders() {
     'Content-Type': 'application/json'
   }
   
+  // Add Signal API key for service auth (if configured)
+  if (SIGNAL_API_KEY) {
+    headers['X-API-Key'] = SIGNAL_API_KEY
+  }
+  
   // Get Supabase session token
   const { data: { session } } = await supabase.auth.getSession()
   if (session?.access_token) {
@@ -126,7 +131,6 @@ async function getAuthHeaders() {
   }
   
   // Get org/project context
-  const { default: useAuthStore } = await import('./auth-store')
   const state = useAuthStore.getState()
   
   if (state.currentOrg?.id) {
@@ -872,6 +876,131 @@ export const signalSeoApi = {
     })
     return response.data.data
   },
+
+  // ============================================================================
+  // UNIFIED PAGE OPTIMIZATION
+  // ============================================================================
+
+  /**
+   * Optimize a page with full context - generates alt text, metadata, schema, and LLM schema together.
+   * This is the recommended way to optimize a page as Signal has all context simultaneously.
+   * 
+   * @param projectId - Project ID
+   * @param pageIdOrPath - Page ID (UUID) or page path (e.g., '/services/seo')
+   * @param options - Optimization options
+   * @param options.optimize_alt - Generate optimized alt text for images (default: true)
+   * @param options.optimize_meta - Generate optimized title/meta description (default: true)
+   * @param options.optimize_schema - Generate JSON-LD schema (default: true)
+   * @param options.optimize_llm - Generate LLM-optimized content blocks (default: true)
+   * @param options.target_keywords - Optional focus keywords
+   * @param options.force_regenerate - Skip cache and regenerate (default: false)
+   * @param options.analyze_content - Include content analysis (default: true)
+   * @param apply - Apply changes to database immediately (default: false)
+   */
+  optimizePage: async (projectId, pageIdOrPath, options = {}, apply = false) => {
+    const response = await signalApi.post('/skills/seo/optimize-page', {
+      projectId,
+      ...(pageIdOrPath.includes('-') && pageIdOrPath.length === 36 
+        ? { pageId: pageIdOrPath } 
+        : { pagePath: pageIdOrPath }),
+      options: {
+        optimize_alt: options.optimize_alt ?? true,
+        optimize_meta: options.optimize_meta ?? true,
+        optimize_schema: options.optimize_schema ?? true,
+        optimize_llm: options.optimize_llm ?? true,
+        analyze_content: options.analyze_content ?? true,
+        target_keywords: options.target_keywords || [],
+        force_regenerate: options.force_regenerate ?? false,
+      },
+      apply,
+    })
+    return response.data.data
+  },
+
+  /**
+   * Analyze page content for SEO insights
+   * Extracts topics, entities, keywords and provides recommendations
+   * 
+   * @param projectId - Project UUID
+   * @param pageIdOrPath - Page UUID or path (e.g., '/about-us')
+   * @param options - Analysis options
+   * @param options.extract_topics - Extract main topics/themes (default: true)
+   * @param options.extract_entities - Named entity recognition (default: true)
+   * @param options.extract_keywords - Important keywords (default: true)
+   * @param options.analyze_depth - Content comprehensiveness (default: true)
+   * @param options.analyze_readability - Reading level (default: true)
+   * @param options.compare_to_competitors - Competitive analysis (default: false)
+   * @param options.target_keywords - Optional focus keywords
+   * 
+   * @returns Analysis result with topics, entities, keywords, scores, recommendations
+   */
+  analyzeContent: async (projectId, pageIdOrPath, options = {}) => {
+    const response = await signalApi.post('/skills/seo/analyze-content', {
+      projectId,
+      ...(pageIdOrPath.includes('-') && pageIdOrPath.length === 36 
+        ? { pageId: pageIdOrPath } 
+        : { pagePath: pageIdOrPath }),
+      options: {
+        extract_topics: options.extract_topics ?? true,
+        extract_entities: options.extract_entities ?? true,
+        extract_keywords: options.extract_keywords ?? true,
+        analyze_depth: options.analyze_depth ?? true,
+        analyze_readability: options.analyze_readability ?? true,
+        compare_to_competitors: options.compare_to_competitors ?? false,
+        target_keywords: options.target_keywords || [],
+      },
+    })
+    return response.data.data
+  },
+
+  // ============================================================================
+  // SEO PIPELINE (Ashbound-style 8-phase optimization)
+  // ============================================================================
+
+  /**
+   * Run the full SEO optimization pipeline (Ashbound architecture).
+   * This is the comprehensive, world-state-aware optimization that:
+   * 1. Loads full site world state (pages, keywords, GSC, images, competitors)
+   * 2. Runs pre-optimization checks
+   * 3. AI opportunity analysis
+   * 4. Generates optimizations (metadata, schema, FAQs, alt text, internal links)
+   * 5. Validates content
+   * 6. Repair loop if needed (max 3 iterations)
+   * 7. Predicts ranking impact
+   * 8. Applies changes to database
+   * 
+   * @param projectId - Project UUID
+   * @param pageIdOrPath - Page UUID or path (e.g., '/services/seo')
+   * @param options - Pipeline options
+   * @param options.siteId - Optional site ID
+   * @param options.skipPhases - Optional array of phase IDs to skip
+   * @param options.maxRepairLoops - Max repair iterations (default: 3)
+   * @returns Pipeline run state with all phase results
+   */
+  runPipeline: async (projectId, pageIdOrPath, options = {}) => {
+    const response = await signalApi.post('/skills/seo/pipeline/run', {
+      projectId,
+      siteId: options.siteId,
+      pageIdOrPath,
+      options: {
+        skipPhases: options.skipPhases || [],
+        maxRepairLoops: options.maxRepairLoops ?? 3,
+      },
+    })
+    return { runId: response.data.runId, state: response.data.state }
+  },
+
+  /**
+   * Get the current state of a pipeline run.
+   * Use this to poll for progress during long-running pipeline executions.
+   * 
+   * @param runId - Pipeline run UUID
+   * @returns Pipeline run state with phase results
+   */
+  getPipelineRunState: async (runId) => {
+    const response = await signalApi.get(`/skills/seo/pipeline/run/${runId}`)
+    return response.data
+  },
   
   // POST /skills/seo/topic-clusters
   generateTopicClusters: async (projectId, seedKeyword = null) => {
@@ -907,6 +1036,349 @@ export const signalSeoApi = {
     })
     return response.data.data
   },
+
+  // POST /skills/seo/suggest-faqs
+  // Generate AI-powered FAQ suggestions for a page
+  suggestFAQs: async (projectId, pageUrl, options = {}) => {
+    const response = await signalApi.post('/skills/seo/suggest-faqs', { 
+      projectId,
+      pageUrl,
+      count: options.count || 5,
+      existingFaqs: options.existingFaqs || [],
+    })
+    return response.data.data
+  },
+
+  // ============================================================================
+  // RANKING PREDICTIONS (ML-based)
+  // ============================================================================
+
+  /**
+   * Get ML-based ranking prediction for a change
+   * Uses Signal's RankingPredictionService
+   */
+  predictRankingImpact: async (projectId, params) => {
+    const response = await signalApi.post('/skills/seo/predict-ranking', {
+      projectId,
+      changeType: params.changeType,
+      oldValue: params.oldValue,
+      newValue: params.newValue,
+      pageUrl: params.pageUrl,
+      targetKeyword: params.targetKeyword,
+      currentMetrics: params.currentMetrics,
+    })
+    return response.data.data
+  },
+
+  /**
+   * Get prediction accuracy stats for the project
+   * Shows how accurate past predictions have been
+   */
+  getPredictionAccuracy: async (projectId) => {
+    const response = await signalApi.get(`/skills/seo/prediction-accuracy/${projectId}`)
+    return response.data.data
+  },
+
+  // ============================================================================
+  // A/B TESTING
+  // ============================================================================
+
+  /**
+   * Create a new metadata A/B test
+   * testData: { path, field: 'title'|'description', variant_a, variant_b, traffic_split? }
+   */
+  createABTest: async (projectId, testData) => {
+    const response = await signalApi.post('/skills/seo/ab-test/create', {
+      project_id: projectId,
+      path: testData.path,
+      field: testData.field || 'title',
+      variant_a: testData.variant_a,
+      variant_b: testData.variant_b,
+      traffic_split: testData.traffic_split,
+    })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Get all A/B tests for a project
+   */
+  getABTests: async (projectId, status) => {
+    const params = status && status !== 'all' ? { status } : {}
+    const response = await signalApi.get(`/skills/seo/ab-tests/${projectId}`, { params })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Get A/B test details and results
+   */
+  getABTestDetails: async (testId) => {
+    const response = await signalApi.get(`/skills/seo/ab-test/${testId}`)
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Pause an active A/B test
+   */
+  pauseABTest: async (testId) => {
+    const response = await signalApi.patch(`/skills/seo/ab-test/${testId}/pause`)
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Resume a paused A/B test
+   */
+  resumeABTest: async (testId) => {
+    const response = await signalApi.patch(`/skills/seo/ab-test/${testId}/resume`)
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Apply winning variant from A/B test. variantId is 'a' or 'b'
+   */
+  applyABTestWinner: async (testId, variantId) => {
+    const response = await signalApi.post(`/skills/seo/ab-test/${testId}/apply-winner`, {
+      winner: variantId === 'a' || variantId === 'b' ? variantId : 'a',
+    })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Generate A/B test variant suggestions using AI
+   */
+  generateABVariants: async (projectId, pageUrl, currentTitle, currentDescription) => {
+    const response = await signalApi.post('/skills/seo/ab-test/generate-variants', {
+      projectId,
+      pageUrl,
+      currentTitle,
+      currentDescription,
+    })
+    return response.data.data
+  },
+
+  // ============================================================================
+  // COMPETITOR MONITORING
+  // ============================================================================
+
+  /**
+   * Get competitor monitor summary (competitors + latest analysis)
+   */
+  getCompetitorMonitoring: async (projectId) => {
+    const response = await signalApi.get(`/skills/seo/competitor-monitor/${projectId}`)
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Get competitor changes (from analysis / alerts)
+   */
+  getCompetitorChanges: async (projectId) => {
+    const response = await signalApi.get(`/skills/seo/competitor-changes/${projectId}`)
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Trigger a fresh SERP snapshot for a keyword
+   */
+  refreshSerpSnapshot: async (projectId, keyword) => {
+    const response = await signalApi.post('/skills/seo/serp-snapshot', {
+      projectId,
+      keyword,
+    })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Generate counter-strategy for competitor change
+   */
+  generateCounterStrategy: async (projectId, changeData) => {
+    const response = await signalApi.post('/skills/seo/counter-strategy', {
+      projectId,
+      ...changeData,
+    })
+    return response.data?.data ?? response.data
+  },
+
+  // ============================================================================
+  // E-E-A-T (Experience, Expertise, Authoritativeness, Trustworthiness)
+  // ============================================================================
+
+  /**
+   * Get E-E-A-T analysis rows for a project
+   */
+  getEEATAnalysis: async (projectId) => {
+    const response = await signalApi.get(`/skills/seo/eeat/${projectId}`)
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Analyze content for E-E-A-T and store result
+   * body: { projectId, pageId?, content?, contentType? }
+   */
+  analyzeContentEEAT: async (projectId, body = {}) => {
+    const response = await signalApi.post('/skills/seo/eeat/analyze-content', {
+      projectId,
+      pageId: body.pageId,
+      content: body.content,
+      contentUrl: body.contentUrl,
+      contentType: body.contentType || 'page',
+    })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Suggest author attribution for content/topic
+   */
+  suggestAuthor: async (projectId, topic, existingAuthors = []) => {
+    const response = await signalApi.post('/skills/seo/eeat/suggest-author', {
+      projectId,
+      content: topic,
+      topic,
+      existingAuthors,
+    })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Generate Person/author JSON-LD schema
+   */
+  generateAuthorSchema: async (projectId, authorData) => {
+    const response = await signalApi.post('/skills/seo/eeat/author-schema', {
+      projectId,
+      authorName: authorData.name,
+      authorUrl: authorData.url,
+      ...authorData,
+    })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Suggest authoritative citations for content/claims
+   */
+  suggestCitations: async (projectId, content, claims) => {
+    const response = await signalApi.post('/skills/seo/eeat/suggest-citations', {
+      projectId,
+      content,
+      claims: claims || [],
+    })
+    return response.data?.data ?? response.data
+  },
+
+  /**
+   * Generate blog post with E-E-A-T enhancements
+   */
+  generateBlogWithEEAT: async (projectId, params) => {
+    const response = await signalApi.post('/skills/seo/eeat/generate-blog', {
+      projectId,
+      topic: params.topic,
+      targetKeyword: params.targetKeyword,
+      authorId: params.authorId,
+      includeFAQ: params.includeFAQ ?? params.includeFaqs ?? true,
+      citationLevel: params.citationLevel ?? 'standard',
+    })
+    return response.data.data
+  },
+
+  // ============================================================================
+  // SIGNAL LEARNING & INSIGHTS
+  // ============================================================================
+
+  /**
+   * Get learning insights and patterns
+   */
+  getLearningInsights: async (projectId) => {
+    const response = await signalApi.get(`/skills/seo/learning/${projectId}`)
+    return response.data.data
+  },
+
+  /**
+   * Analyze prediction accuracy and generate learnings
+   */
+  analyzeLearnings: async (projectId) => {
+    const response = await signalApi.post('/skills/seo/learning/analyze', {
+      projectId,
+    })
+    return response.data.data
+  },
+
+  /**
+   * Get model adjustment recommendations
+   */
+  getModelAdjustments: async (projectId) => {
+    const response = await signalApi.get(`/skills/seo/learning/adjustments/${projectId}`)
+    return response.data.data
+  },
+
+  // ============================================================================
+  // REDIRECTS (Signal-powered)
+  // ============================================================================
+
+  /**
+   * Suggest redirects for 404 errors
+   */
+  suggest404Redirects: async (projectId) => {
+    const response = await signalApi.post('/skills/seo/redirects/suggest-404-fixes', {
+      projectId,
+    })
+    return response.data.data
+  },
+
+  /**
+   * Analyze redirect chains
+   */
+  analyzeRedirectChains: async (projectId) => {
+    const response = await signalApi.get(`/skills/seo/redirects/chains/${projectId}`)
+    return response.data.data
+  },
+}
+
+// ============================================================================
+// INSIGHTS API - Proactive Insights & Traffic Analysis
+// ============================================================================
+
+const insightsApi = {
+  /**
+   * Get insight history for a project
+   * @param {string} projectId 
+   * @param {Object} options - { limit: number }
+   */
+  getHistory: async (projectId, options = {}) => {
+    const response = await signalApi.get(`/insights/${projectId}/history`, {
+      params: { limit: options.limit || 20 },
+    })
+    return response.data
+  },
+
+  /**
+   * Get traffic anomaly alerts for a project
+   * @param {string} projectId 
+   * @param {Object} options - { limit: number, days: number }
+   */
+  getTrafficAlerts: async (projectId, options = {}) => {
+    const response = await signalApi.get(`/insights/${projectId}/traffic-alerts`, {
+      params: { 
+        limit: options.limit || 10,
+        days: options.days || 30,
+      },
+    })
+    return response.data
+  },
+
+  /**
+   * Run on-demand traffic analysis with root cause diagnosis
+   * @param {string} projectId 
+   */
+  analyzeTraffic: async (projectId) => {
+    const response = await signalApi.post(`/insights/${projectId}/analyze-traffic`)
+    return response.data
+  },
+
+  /**
+   * Trigger a briefing for a project
+   * @param {string} projectId 
+   */
+  triggerBriefing: async (projectId) => {
+    const response = await signalApi.post(`/insights/${projectId}/briefing`)
+    return response.data
+  },
 }
 
 // ============================================================================
@@ -914,86 +1386,184 @@ export const signalSeoApi = {
 // ============================================================================
 
 export const crmAiApi = {
+  // ==================== LEAD SCORING & PRIORITIZATION ====================
+
   /**
-   * Analyze a prospect and get AI insights
-   * @param {string} prospectId - Prospect ID to analyze
-   * @param {Object} options - Optional analysis options
-   * @returns {Promise<Object>} AI analysis with lead score, next actions, tags
+   * Score a lead with AI analysis
+   * @param {string} prospectId - Prospect ID to score
+   * @returns {Promise<Object>} Lead score with factors, risks, and recommendations
    */
-  analyzeProspect: async (prospectId, options = {}) => {
-    const response = await signalApi.post(`/crm/prospects/${prospectId}/analyze`, options)
+  scoreLead: async (prospectId) => {
+    const response = await signalApi.post('/skills/crm/score-lead', { prospectId })
     return response.data
   },
 
   /**
-   * Get lead score for a prospect
-   * @param {string} prospectId - Prospect ID
-   * @returns {Promise<Object>} Lead score with factors
+   * Get AI-prioritized list of contacts needing follow-up
+   * @param {number} capacity - Max number of contacts to return
+   * @returns {Promise<Object>} Prioritized contacts with reasons and suggested actions
    */
-  getLeadScore: async (prospectId) => {
-    const response = await signalApi.get(`/crm/prospects/${prospectId}/lead-score`)
+  prioritizeFollowups: async (capacity = 10) => {
+    const response = await signalApi.post('/skills/crm/prioritize-followups', { capacity })
     return response.data
   },
 
   /**
    * Suggest next best action for a prospect
    * @param {string} prospectId - Prospect ID
-   * @param {Object} context - Optional context for better suggestions
-   * @returns {Promise<Object>} Suggested action with reasoning
+   * @returns {Promise<Object>} Suggested action with talking points and timing
    */
-  suggestNextAction: async (prospectId, context = {}) => {
-    const response = await signalApi.post(`/crm/prospects/${prospectId}/suggest-action`, context)
+  suggestNextAction: async (prospectId) => {
+    const response = await signalApi.post('/skills/crm/suggest-next-action', { prospectId })
+    return response.data
+  },
+
+  // ==================== PIPELINE ANALYSIS ====================
+
+  /**
+   * Analyze sales pipeline health
+   * @param {string} stage - Optional stage filter
+   * @returns {Promise<Object>} Pipeline health, at-risk deals, and recommendations
+   */
+  analyzePipeline: async (stage) => {
+    const response = await signalApi.post('/skills/crm/analyze-pipeline', { stage })
     return response.data
   },
 
   /**
-   * Draft an email for a prospect
+   * Predict deal close probability
    * @param {string} prospectId - Prospect ID
-   * @param {Object} options - Email options (type, purpose, tone)
-   * @returns {Promise<Object>} Draft email with subject and body
+   * @returns {Promise<Object>} Close probability with factors and improvement actions
    */
-  draftEmail: async (prospectId, options = {}) => {
-    const response = await signalApi.post(`/crm/prospects/${prospectId}/draft-email`, options)
+  predictClose: async (prospectId) => {
+    const response = await signalApi.post(`/skills/crm/predict-close/${prospectId}`)
     return response.data
   },
 
+  // ==================== EMAIL INTELLIGENCE ====================
+
   /**
-   * Summarize prospect interaction history
+   * Analyze an email thread for insights
    * @param {string} prospectId - Prospect ID
-   * @returns {Promise<Object>} Summary of all interactions
+   * @param {string} threadId - Gmail thread ID
+   * @param {Array} messages - Email messages in the thread
+   * @returns {Promise<Object>} Thread analysis with sentiment, topics, action items
    */
-  summarizeHistory: async (prospectId) => {
-    const response = await signalApi.get(`/crm/prospects/${prospectId}/summary`)
+  analyzeEmailThread: async (prospectId, threadId, messages) => {
+    const response = await signalApi.post('/skills/crm/email/analyze-thread', {
+      prospectId,
+      threadId,
+      messages,
+    })
     return response.data
   },
 
   /**
-   * Get smart tag suggestions for a prospect
+   * Generate smart reply suggestions for an email
    * @param {string} prospectId - Prospect ID
-   * @returns {Promise<Object>} Suggested tags with confidence scores
+   * @param {string} threadId - Gmail thread ID
+   * @param {Object} lastMessage - The email to reply to
+   * @param {Object} options - Reply options (tone, senderName, previousMessages)
+   * @returns {Promise<Object>} Reply suggestions with different tones
    */
-  suggestTags: async (prospectId) => {
-    const response = await signalApi.get(`/crm/prospects/${prospectId}/suggest-tags`)
+  generateReplySuggestions: async (prospectId, threadId, lastMessage, options = {}) => {
+    const response = await signalApi.post('/skills/crm/email/suggest-replies', {
+      prospectId,
+      threadId,
+      lastMessage,
+      ...options,
+    })
     return response.data
   },
 
   /**
-   * Get pipeline predictions for a prospect
+   * Get cached email insights for a prospect
    * @param {string} prospectId - Prospect ID
-   * @returns {Promise<Object>} Stage prediction with probability and timeline
+   * @returns {Promise<Object>} All email insights for the prospect
    */
-  getPipelinePrediction: async (prospectId) => {
-    const response = await signalApi.get(`/crm/prospects/${prospectId}/predict-pipeline`)
+  getEmailInsights: async (prospectId) => {
+    const response = await signalApi.get(`/skills/crm/email/insights/${prospectId}`)
+    return response.data
+  },
+
+  // ==================== EMAIL DRAFTING ====================
+
+  /**
+   * Draft a personalized email for a prospect
+   * @param {string} prospectId - Prospect ID
+   * @param {string} purpose - Email purpose/goal
+   * @param {Object} options - Options (tone, senderName)
+   * @returns {Promise<Object>} Draft email with subject, body, and CTA
+   */
+  draftEmail: async (prospectId, purpose, options = {}) => {
+    const response = await signalApi.post('/skills/crm/draft-email', {
+      prospectId,
+      purpose,
+      ...options,
+    })
+    return response.data
+  },
+
+  // ==================== DASHBOARD ====================
+
+  /**
+   * Get AI insights for CRM dashboard
+   * @param {number} limit - Max items per category
+   * @returns {Promise<Object>} Dashboard insights including priority actions and trends
+   */
+  getDashboardInsights: async (limit = 5) => {
+    const response = await signalApi.get('/skills/crm/dashboard-insights', { params: { limit } })
+    return response.data
+  },
+
+  // ==================== EMAIL REPLY DRAFT GENERATION ====================
+
+  /**
+   * Generate a draft reply to an email using Signal AI
+   * Draft is for approval only - never auto-sends
+   * 
+   * @param {Object} params - Draft generation parameters
+   * @param {string} params.emailId - Email cache ID
+   * @param {Object} params.threadContext - Email context (subject, from, body, classification, etc.)
+   * @param {Object} params.businessContext - Business context (orgName, userName, replyTone)
+   * @param {string} params.additionalInstructions - Optional custom instructions
+   * @returns {Promise<Object>} Draft with subject, body, suggestions, tone, confidence
+   */
+  generateReplyDraft: async (params) => {
+    const response = await signalApi.post('/email/draft/generate', params)
     return response.data
   },
 
   /**
-   * Get dashboard AI insights for all prospects
-   * @param {Object} options - Filter options
-   * @returns {Promise<Object>} Dashboard-level insights and trends
+   * Get an existing draft for an email
+   * @param {string} emailId - Email cache ID
+   * @returns {Promise<Object|null>} Draft or null if none exists
    */
-  getDashboardInsights: async (options = {}) => {
-    const response = await signalApi.post('/crm/dashboard-insights', options)
+  getDraft: async (emailId) => {
+    const response = await signalApi.get(`/email/draft/${emailId}`)
+    return response.data
+  },
+
+  /**
+   * Approve a draft (mark as ready to send)
+   * User can optionally provide edited body
+   * @param {string} draftId - Draft ID
+   * @param {string} editedBody - Optional edited body text
+   * @returns {Promise<Object>} Success status
+   */
+  approveDraft: async (draftId, editedBody) => {
+    const response = await signalApi.post(`/email/draft/${draftId}/approve`, { editedBody })
+    return response.data
+  },
+
+  /**
+   * Reject a draft
+   * @param {string} draftId - Draft ID
+   * @param {string} reason - Optional rejection reason
+   * @returns {Promise<Object>} Success status
+   */
+  rejectDraft: async (draftId, reason) => {
+    const response = await signalApi.post(`/email/draft/${draftId}/reject`, { reason })
     return response.data
   },
 }
@@ -1319,8 +1889,103 @@ export const budgetApi = {
 }
 
 // ============================================================================
+// SEO Skills API - Unified SEO AI exports (alias for signalSeoApi)
+// ============================================================================
+
+export const seoSkillsApi = {
+  /**
+   * Get data-driven SEO opportunities requiring human decision
+   * Unlike AI quick-wins, these are REAL opportunities from GSC data:
+   * - striking_distance: Keywords in positions 8-20 with high impressions
+   * - low_ctr: High position but poor click-through rate  
+   * - cannibalization: Multiple pages competing for same keyword
+   * - content: Thin content, content gaps, outdated content
+   * - strategic: Competitor gaps, new content opportunities
+   * 
+   * @param {string} projectId - Project ID
+   * @param {Object} options - Options
+   * @param {number} options.limit - Max results (default 20)
+   * @param {string[]} options.includeTypes - Types to include
+   * @returns {Promise<Object>} { opportunities, summary }
+   */
+  getOpportunities: async (projectId, options = {}) => {
+    const response = await signalApi.post('/skills/seo/opportunities', { projectId, ...options })
+    return response.data
+  },
+
+  /**
+   * Get quick win SEO opportunities (AI-generated)
+   * @deprecated Use getOpportunities() for real data-driven opportunities
+   * @param {string} projectId - Project ID
+   * @returns {Promise<Object>} Quick wins with recommendations
+   */
+  getQuickWins: async (projectId) => {
+    const response = await signalApi.post('/skills/seo/quick-wins', { projectId })
+    return response.data
+  },
+
+  /**
+   * Get keyword recommendations
+   * @param {string} projectId - Project ID
+   * @param {string} pageUrl - Optional page URL
+   * @returns {Promise<Object>} Keyword recommendations
+   */
+  getKeywordRecommendations: async (projectId, pageUrl) => {
+    const response = await signalApi.post('/skills/seo/keyword-recommendations', { projectId, pageUrl })
+    return response.data
+  },
+
+  /**
+   * Analyze a page with AI
+   * @param {string} projectId - Project ID
+   * @param {string} url - Page URL
+   * @returns {Promise<Object>} Page analysis
+   */
+  analyzePage: async (projectId, url) => {
+    const response = await signalApi.post('/skills/seo/analyze-page', { projectId, url })
+    return response.data
+  },
+
+  /**
+   * Run comprehensive AI brain analysis
+   * @param {string} projectId - Project ID
+   * @param {Object} options - Analysis options
+   * @returns {Promise<Object>} Comprehensive analysis
+   */
+  runBrain: async (projectId, options = {}) => {
+    const response = await signalApi.post('/skills/seo/brain', { projectId, ...options })
+    return response.data
+  },
+
+  /**
+   * Get content brief for a keyword
+   * @param {string} projectId - Project ID
+   * @param {string} targetKeyword - Target keyword
+   * @returns {Promise<Object>} Content brief
+   */
+  getContentBrief: async (projectId, targetKeyword) => {
+    const response = await signalApi.post('/skills/seo/content-brief', { projectId, targetKeyword })
+    return response.data
+  },
+}
+
+// ============================================================================
+// CRM Skills API - Alias for crmAiApi (backward compatibility)
+// ============================================================================
+
+export const crmSkillsApi = crmAiApi
+
+// ============================================================================
+// Attach APIs to signalApi for convenience
+// ============================================================================
+
+signalApi.insights = insightsApi
+signalApi.seo = seoSkillsApi
+signalApi.crm = crmAiApi
+
+// ============================================================================
 // Default Export
 // ============================================================================
 
 export default signalApi
-export { signalApi }
+export { signalApi, insightsApi }

@@ -1,7 +1,14 @@
 // src/components/seo/SEOAlerts.jsx
 // SEO Alerts - intelligent monitoring and notifications
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { 
+  useSeoAlerts, 
+  useSeoAlertStats,
+  useCheckAlerts,
+  useAcknowledgeAlert,
+  useResolveAlert
+} from '@/hooks/seo'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,49 +26,30 @@ import {
 } from 'lucide-react'
 
 export default function SEOAlerts({ projectId }) {
-  const { 
-    alerts, 
-    alertsStats,
-    alertsLoading, 
-    fetchAlerts,
-    checkAlerts,
-    acknowledgeAlert,
-    resolveAlert
-  } = useSeoStore()
+  // React Query hooks
+  const { data: alertsData, isLoading: alertsLoading } = useSeoAlerts(projectId)
+  const { data: alertsStats } = useSeoAlertStats(projectId)
   
-  const [isChecking, setIsChecking] = useState(false)
+  // Mutations
+  const checkAlertsMutation = useCheckAlerts()
+  const acknowledgeMutation = useAcknowledgeAlert()
+  const resolveMutation = useResolveAlert()
+  
+  // Extract data
+  const alerts = alertsData?.alerts || alertsData || []
+  
   const [filter, setFilter] = useState('active')
 
-  useEffect(() => {
-    if (projectId) {
-      fetchAlerts(projectId)
-    }
-  }, [projectId])
-
-  const handleCheckAlerts = async () => {
-    setIsChecking(true)
-    try {
-      await checkAlerts(projectId, true) // true = send notifications
-    } catch (error) {
-      console.error('Check alerts error:', error)
-    }
-    setIsChecking(false)
+  const handleCheckAlerts = () => {
+    checkAlertsMutation.mutate({ projectId, notify: true })
   }
 
-  const handleAcknowledge = async (alertId) => {
-    try {
-      await acknowledgeAlert(alertId)
-    } catch (error) {
-      console.error('Acknowledge error:', error)
-    }
+  const handleAcknowledge = (alertId) => {
+    acknowledgeMutation.mutate(alertId)
   }
 
-  const handleResolve = async (alertId) => {
-    try {
-      await resolveAlert(alertId)
-    } catch (error) {
-      console.error('Resolve error:', error)
-    }
+  const handleResolve = (alertId) => {
+    resolveMutation.mutate(alertId)
   }
 
   const getAlertIcon = (type) => {
@@ -106,10 +94,10 @@ export default function SEOAlerts({ projectId }) {
         </div>
         <Button 
           onClick={handleCheckAlerts} 
-          disabled={isChecking || alertsLoading}
+          disabled={checkAlertsMutation.isLoading || alertsLoading}
         >
-          <RefreshCw className={`mr-2 h-4 w-4 ${isChecking ? 'animate-spin' : ''}`} />
-          {isChecking ? 'Checking...' : 'Check Now'}
+          <RefreshCw className={`mr-2 h-4 w-4 ${checkAlertsMutation.isLoading ? 'animate-spin' : ''}`} />
+          {checkAlertsMutation.isLoading ? 'Checking...' : 'Check Now'}
         </Button>
       </div>
 

@@ -25,7 +25,7 @@ import {
 import EchoAvatar from './EchoAvatar'
 import EchoMessageBubble from './EchoMessageBubble'
 import EchoTypingIndicator from './EchoTypingIndicator'
-import useMessagesStore from '@/lib/messages-store'
+import { useSendMessage } from '@/lib/hooks'
 import useAuthStore from '@/lib/auth-store'
 import usePageContextStore from '@/lib/page-context-store'
 
@@ -45,7 +45,7 @@ export function EchoConversation({
 }) {
   const navigate = useNavigate()
   const { user } = useAuthStore()
-  const { sendToEcho, echoTyping, clearEchoTyping } = useMessagesStore()
+  const sendMessageMutation = useSendMessage()
   
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -55,7 +55,7 @@ export function EchoConversation({
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, echoTyping])
+  }, [messages])
   
   // Focus input on mount
   useEffect(() => {
@@ -72,11 +72,10 @@ export function EchoConversation({
     try {
       // Get page context for Echo awareness
       const pageContext = usePageContextStore.getState().getContext()
-      await sendToEcho({
+      await sendMessageMutation.mutateAsync({
         recipientId: echoContact.id,
         content: message,
         subject: 'Echo Conversation',
-        pageContext
       })
     } catch (error) {
       console.error('Failed to send to Echo:', error)
@@ -213,7 +212,7 @@ export function EchoConversation({
             ))}
             
             {/* Typing indicator */}
-            {echoTyping && <EchoTypingIndicator />}
+            {sendMessageMutation.isPending && <EchoTypingIndicator />}
             
             <div ref={messagesEndRef} />
           </>

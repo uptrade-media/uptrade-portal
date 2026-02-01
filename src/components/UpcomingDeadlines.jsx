@@ -5,17 +5,34 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, Calendar, Clock, AlertCircle } from 'lucide-react'
 import { reportsApi } from '@/lib/portal-api'
 
+/* Dark theme + liquid glass: use glass/surface tokens and accent for status tint only */
 const priorityConfig = {
-  high: { color: 'bg-red-100', textColor: 'text-red-700', label: 'High' },
-  normal: { color: 'bg-yellow-100', textColor: 'text-yellow-700', label: 'Normal' },
-  low: { color: 'bg-blue-100', textColor: 'text-blue-700', label: 'Low' }
+  high: { label: 'High', accentClass: 'text-[var(--accent-red)]' },
+  normal: { label: 'Normal', accentClass: 'text-[var(--accent-orange)]' },
+  low: { label: 'Low', accentClass: 'text-[var(--accent-blue)]' }
 }
 
 const statusConfig = {
-  overdue: { color: 'bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700', icon: AlertCircle },
-  'in-progress': { color: 'bg-orange-50', borderColor: 'border-orange-200', textColor: 'text-orange-700', icon: Clock },
-  pending: { color: 'bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700', icon: Calendar },
-  completed: { color: 'bg-green-50', borderColor: 'border-green-200', textColor: 'text-green-700', icon: null }
+  overdue: {
+    borderAccent: 'border-l-[var(--accent-red)]',
+    iconColor: 'text-[var(--accent-red)]',
+    icon: AlertCircle
+  },
+  'in-progress': {
+    borderAccent: 'border-l-[var(--accent-orange)]',
+    iconColor: 'text-[var(--accent-orange)]',
+    icon: Clock
+  },
+  pending: {
+    borderAccent: 'border-l-[var(--accent-blue)]',
+    iconColor: 'text-[var(--accent-blue)]',
+    icon: Calendar
+  },
+  completed: {
+    borderAccent: 'border-l-[var(--accent-green)]',
+    iconColor: 'text-[var(--accent-green)]',
+    icon: null
+  }
 }
 
 function getDaysUntilColor(daysSince) {
@@ -61,7 +78,7 @@ export function UpcomingDeadlines({ limit = 10 }) {
 
   if (error) {
     return (
-      <Card>
+      <Card className="border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-sm">
         <CardHeader>
           <CardTitle>Upcoming Deadlines</CardTitle>
         </CardHeader>
@@ -70,7 +87,7 @@ export function UpcomingDeadlines({ limit = 10 }) {
             <p className="text-[var(--text-secondary)]">{error}</p>
             <button
               onClick={fetchDeadlines}
-              className="mt-3 text-sm text-blue-600 hover:underline"
+              className="mt-3 text-sm text-[var(--accent-blue)] hover:underline"
             >
               Try again
             </button>
@@ -81,7 +98,7 @@ export function UpcomingDeadlines({ limit = 10 }) {
   }
 
   return (
-    <Card>
+    <Card className="border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-sm">
       <CardHeader>
         <CardTitle>Upcoming Deadlines</CardTitle>
       </CardHeader>
@@ -100,32 +117,29 @@ export function UpcomingDeadlines({ limit = 10 }) {
             {deadlines.slice(0, limit).map((deadline, index) => {
               const config = statusConfig[deadline.status] || statusConfig.pending
               const priorityConfig_ = priorityConfig[deadline.priority] || priorityConfig.normal
-              const daysUntil = deadline.days_until || Math.floor((new Date(deadline.dueDate) - Date.now()) / (1000 * 60 * 60 * 24))
+              const daysUntil = deadline.days_until ?? Math.floor((new Date(deadline.dueDate) - Date.now()) / (1000 * 60 * 60 * 24))
               const StatusIcon = config.icon
-              // Ensure a stable, unique key even when backend leaves ids undefined
               const key = deadline.id || deadline.item_id || `${deadline.item_type || 'item'}-${index}`
 
               return (
                 <div
                   key={key}
-                  className={`p-3 border rounded-lg transition-colors hover:shadow-sm ${config.color} ${config.borderColor}`}
+                  className={`rounded-lg border border-[var(--glass-border)] border-l-4 bg-[var(--glass-bg)] p-3 backdrop-blur-sm transition-colors hover:bg-[var(--glass-bg-hover)] ${config.borderAccent}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         {StatusIcon && (
-                          <StatusIcon className={`w-4 h-4 ${config.textColor} flex-shrink-0`} />
+                          <StatusIcon className={`w-4 h-4 flex-shrink-0 ${config.iconColor}`} />
                         )}
-                        <p className={`font-medium ${config.textColor} truncate`}>
+                        <p className="font-medium truncate text-[var(--text-primary)]">
                           {deadline.name}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                         <span className="capitalize">{deadline.item_type}</span>
                         <span>•</span>
-                        <span>
-                          Due {format(new Date(deadline.dueDate), 'MMM d')}
-                        </span>
+                        <span>Due {format(new Date(deadline.dueDate), 'MMM d')}</span>
                       </div>
                     </div>
 
@@ -133,9 +147,9 @@ export function UpcomingDeadlines({ limit = 10 }) {
                       <Badge variant={getDaysUntilColor(daysUntil)} className="text-xs whitespace-nowrap">
                         {formatDaysUntil(daysUntil)}
                       </Badge>
-                      <Badge 
-                        variant="outline" 
-                        className={`text-xs whitespace-nowrap ${priorityConfig_.textColor}`}
+                      <Badge
+                        variant="outline"
+                        className={`text-xs whitespace-nowrap border-[var(--glass-border)] ${priorityConfig_.accentClass}`}
                       >
                         {priorityConfig_.label}
                       </Badge>
@@ -143,8 +157,9 @@ export function UpcomingDeadlines({ limit = 10 }) {
                   </div>
 
                   {deadline.status === 'overdue' && (
-                    <div className="mt-2 text-xs text-red-600 font-medium">
-                      ⚠️ This deadline has passed
+                    <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-[var(--accent-orange)]">
+                      <span aria-hidden>⚠️</span>
+                      <span>This deadline has passed</span>
                     </div>
                   )}
                 </div>
@@ -152,10 +167,10 @@ export function UpcomingDeadlines({ limit = 10 }) {
             })}
 
             {deadlines.length > limit && (
-              <div className="text-center mt-4 pt-3 border-t">
-                <a 
+              <div className="mt-4 border-t border-[var(--glass-border)] pt-3 text-center">
+                <a
                   href="/dashboard"
-                  className="text-sm text-blue-600 hover:underline"
+                  className="text-sm text-[var(--accent-blue)] hover:underline"
                 >
                   View all {deadlines.length} deadlines
                 </a>

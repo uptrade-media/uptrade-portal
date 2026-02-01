@@ -2,7 +2,23 @@
  * @uptrade/site-kit - SiteKitProvider
  * 
  * Unified provider component that initializes all enabled modules.
+ * 
+ * IMPORTANT: Client sites ONLY need to provide an API key.
+ * - apiKey: Required - identifies project and provides access
+ * - apiUrl: Optional - defaults to https://api.uptrademedia.com
+ * 
  * All API calls go through Portal API with API key auth - never Supabase directly.
+ * The API key identifies the project, so no project_id is needed.
+ * 
+ * Example minimal setup:
+ * ```tsx
+ * <SiteKitProvider
+ *   apiKey={process.env.NEXT_PUBLIC_UPTRADE_API_KEY}
+ *   analytics={{ enabled: true }}
+ *   engage={{ enabled: true }}
+ *   forms={{ enabled: true }}
+ * >
+ * ```
  */
 
 'use client'
@@ -47,35 +63,46 @@ interface SiteKitProviderProps extends SiteKitConfig {
 
 export function SiteKitProvider({
   children,
-  apiUrl = 'https://api.uptrademedia.com',
-  signalUrl = 'https://signal.uptrademedia.com',
   apiKey,
+  apiUrl,
+  signalUrl,
   analytics,
   engage,
   forms,
   signal,
   debug = false,
 }: SiteKitProviderProps & { signal?: SignalConfig }) {
+  // Default to production URLs if not specified
+  const finalApiUrl = apiUrl || 'https://api.uptrademedia.com'
+  const finalSignalUrl = signalUrl || 'https://signal.uptrademedia.com'
+  
+  // Validate API key
+  if (!apiKey) {
+    console.error('@uptrade/site-kit: No API key provided. Set NEXT_PUBLIC_UPTRADE_API_KEY environment variable.')
+  }
+  
   // Set window globals for Portal API access
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      ;(window as any).__SITE_KIT_API_URL__ = apiUrl
-      ;(window as any).__SITE_KIT_SIGNAL_URL__ = signalUrl
+      ;(window as any).__SITE_KIT_API_URL__ = finalApiUrl
+      ;(window as any).__SITE_KIT_SIGNAL_URL__ = finalSignalUrl
       ;(window as any).__SITE_KIT_API_KEY__ = apiKey
       ;(window as any).__SITE_KIT_DEBUG__ = debug
     }
     
     // Configure forms API
-    configureFormsApi({
-      baseUrl: apiUrl,
-      apiKey,
-    })
-  }, [apiUrl, signalUrl, apiKey, debug])
+    if (apiKey) {
+      configureFormsApi({
+        baseUrl: finalApiUrl,
+        apiKey,
+      })
+    }
+  }, [finalApiUrl, finalSignalUrl, apiKey, debug])
 
   const contextValue = useMemo<SiteKitContextValue>(
     () => ({
-      apiUrl,
-      signalUrl,
+      apiUrl: finalApiUrl,
+      signalUrl: finalSignalUrl,
       apiKey,
       analytics,
       engage,
@@ -84,7 +111,7 @@ export function SiteKitProvider({
       debug,
       isReady: true,
     }),
-    [apiUrl, signalUrl, apiKey, analytics, engage, forms, signal, debug]
+    [finalApiUrl, finalSignalUrl, apiKey, analytics, engage, forms, signal, debug]
   )
 
   // Build the provider tree based on enabled modules
@@ -109,7 +136,7 @@ export function SiteKitProvider({
     content = (
       <Suspense fallback={null}>
         <AnalyticsProvider
-          apiUrl={apiUrl}
+          apiUrl={finalApiUrl}
           apiKey={apiKey}
           trackPageViews={analytics.trackPageViews !== false}
           trackWebVitals={analytics.trackWebVitals !== false}
@@ -129,7 +156,7 @@ export function SiteKitProvider({
       <>
         {content}
         <EngageWidget 
-          apiUrl={apiUrl} 
+          apiUrl={finalApiUrl} 
           apiKey={apiKey}
           position={engage.position || 'bottom-right'}
           chatEnabled={engage.chatEnabled !== false}

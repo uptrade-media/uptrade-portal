@@ -49,8 +49,18 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 
-// Store
-import { useUserTasksStore, priorityConfig } from '@/lib/projects-v2-store'
+// Hooks
+import {
+  useUserTasks,
+  useUserTasksCategories,
+  useUserTasksStats,
+  useCreateUserTask,
+  useUpdateUserTask,
+  useCompleteUserTask,
+  useUncompleteUserTask,
+  useDeleteUserTask,
+  priorityConfig,
+} from '@/lib/hooks'
 
 // Priority color classes
 const PRIORITY_RING = {
@@ -467,18 +477,15 @@ export default function UserTasksPanel({
   activeCategoryId = null,
   showCompleted = false,
 }) {
-  const {
-    tasks,
-    categories,
-    stats,
-    isLoading,
-    fetchTasks,
-    createTask,
-    updateTask,
-    deleteTask,
-    toggleComplete,
-    toggleStar,
-  } = useUserTasksStore()
+  const { data: tasksData = [], isLoading } = useUserTasks({})
+  const tasks = Array.isArray(tasksData) ? tasksData : (tasksData?.tasks || tasksData?.data || [])
+  const { data: categories = [] } = useUserTasksCategories()
+  const { data: stats } = useUserTasksStats()
+  const createTaskMutation = useCreateUserTask()
+  const updateTaskMutation = useUpdateUserTask()
+  const completeTaskMutation = useCompleteUserTask()
+  const uncompleteTaskMutation = useUncompleteUserTask()
+  const deleteTaskMutation = useDeleteUserTask()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [editingTask, setEditingTask] = useState(null)
@@ -545,19 +552,26 @@ export default function UserTasksPanel({
 
   // Handlers
   const handleQuickAdd = useCallback(async (data) => {
-    await createTask({
+    await createTaskMutation.mutateAsync({
       ...data,
       category_id: activeCategoryId,
     })
-  }, [createTask, activeCategoryId])
+  }, [createTaskMutation, activeCategoryId])
 
   const handleToggle = useCallback(async (taskId) => {
-    await toggleComplete(taskId)
-  }, [toggleComplete])
+    const task = tasks.find(t => t.id === taskId)
+    if (task?.completed_at) {
+      await uncompleteTaskMutation.mutateAsync(taskId)
+    } else {
+      await completeTaskMutation.mutateAsync(taskId)
+    }
+  }, [tasks, completeTaskMutation, uncompleteTaskMutation])
 
   const handleToggleStar = useCallback(async (taskId) => {
-    await toggleStar(taskId)
-  }, [toggleStar])
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+    await updateTaskMutation.mutateAsync({ taskId, data: { is_starred: !task.is_starred } })
+  }, [tasks, updateTaskMutation])
 
   const handleEdit = useCallback((task) => {
     setEditingTask(task)
@@ -565,16 +579,16 @@ export default function UserTasksPanel({
   }, [])
 
   const handleDelete = useCallback(async (taskId) => {
-    await deleteTask(taskId)
-  }, [deleteTask])
+    await deleteTaskMutation.mutateAsync(taskId)
+  }, [deleteTaskMutation])
 
   const handleSave = useCallback(async (data) => {
     if (editingTask?.id) {
-      await updateTask(editingTask.id, data)
+      await updateTaskMutation.mutateAsync({ taskId: editingTask.id, data })
     } else {
-      await createTask(data)
+      await createTaskMutation.mutateAsync(data)
     }
-  }, [editingTask, createTask, updateTask])
+  }, [editingTask, createTaskMutation, updateTaskMutation])
 
   // Loading state
   if (isLoading && !tasks.length) {

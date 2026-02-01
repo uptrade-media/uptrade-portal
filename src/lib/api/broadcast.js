@@ -2,7 +2,7 @@
  * Broadcast API Client
  * Handles all social media broadcast operations
  */
-import { portalApi } from './portal'
+import portalApi from '../portal-api'
 
 const BASE_PATH = '/broadcast'
 
@@ -462,6 +462,51 @@ export const broadcastApi = {
     })
     
     return { url: publicUrl, filename: file.name, contentType: file.type }
+  },
+
+  // ===== COMPOSER INSIGHTS (Peak times, formats, trends, hooks) =====
+  
+  /**
+   * Get platform-specific insights for post composers
+   * Includes peak posting times, top formats, trending topics, and hooks
+   * @param {string} projectId - Project ID
+   * @param {string} platform - Platform name (instagram, facebook, linkedin, tiktok, gbp)
+   * @returns {Promise<{peak_times, top_formats, trending_topics, trending_hooks, source}>}
+   */
+  getComposerInsights: (projectId, platform) => {
+    return portalApi.get(`${BASE_PATH}/projects/${projectId}/composer-insights?platform=${platform}`)
+  },
+  
+  /**
+   * Get trending hooks for content creation
+   * @param {string} projectId - Project ID
+   * @param {string} platform - Optional platform filter
+   * @param {number} limit - Number of hooks to return
+   */
+  getTrendingHooks: (projectId, platform = 'all', limit = 5) => {
+    return portalApi.get(`${BASE_PATH}/projects/${projectId}/trending-hooks?platform=${platform}&limit=${limit}`)
+  },
+  
+  /**
+   * Get our best performing hashtags (based on actual post metrics)
+   * @param {string} projectId - Project ID
+   * @param {string} platform - Optional platform filter
+   * @param {number} limit - Number of hashtags to return
+   */
+  getTopHashtags: (projectId, platform, limit = 20) => {
+    const params = new URLSearchParams({ limit: limit.toString() })
+    if (platform) params.append('platform', platform)
+    return portalApi.get(`${BASE_PATH}/projects/${projectId}/top-hashtags?${params}`)
+  },
+  
+  /**
+   * Get content patterns for a project
+   * @param {string} projectId - Project ID
+   * @param {string} platform - Optional platform filter
+   */
+  getContentPatterns: (projectId, platform) => {
+    const params = platform ? `?platform=${platform}` : ''
+    return portalApi.get(`${BASE_PATH}/projects/${projectId}/content-patterns${params}`)
   },
 }
 

@@ -124,7 +124,14 @@ export default function MagicLogin() {
           navigate(redirect, { replace: true })
         }, 1500)
       } else {
-        throw new Error('Account not found in system')
+        // SECURITY: User has Supabase session but no contact record - sign them out
+        console.warn('[MagicLogin] No contact record found - signing out')
+        try {
+          await supabase.auth.signOut()
+        } catch (signOutError) {
+          console.error('[MagicLogin] Error signing out:', signOutError)
+        }
+        throw new Error('Account not found in system. Please contact support.')
       }
     } catch (err) {
       setStatus('error')

@@ -11,7 +11,7 @@ import { useState, useEffect, useRef } from 'react'
 import { 
   Palette, Zap, Globe, Save, RotateCcw, Info, Settings2,
   Check, AlertCircle, Loader2, ShoppingBag, CreditCard, ExternalLink, Mail,
-  Upload, Image as ImageIcon, X, Users, Bell
+  Upload, Image as ImageIcon, X, Users, Bell, Building2, MapPin
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -31,6 +31,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 // Stores
 import useAuthStore from '@/lib/auth-store'
@@ -45,6 +52,14 @@ import SquareSetupDialog from '@/components/commerce/SquareSetupDialog'
 
 // API Keys manager
 import APIKeysManager from '@/components/projects/APIKeysManager'
+
+// Shared components
+import BusinessProfileCard from '@/components/shared/BusinessProfileCard'
+
+// Constants
+import { INDUSTRY_CATEGORIES } from '@/lib/constants/industries'
+import { US_STATES } from '@/lib/constants/us-states'
+import { PROJECT_STATUS_CONFIG } from '@/lib/hooks'
 
 // Default brand colors (Uptrade)
 const DEFAULT_BRAND_PRIMARY = '#4bbf39'
@@ -169,6 +184,7 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
   // Form state
   const [formData, setFormData] = useState({
     title: project?.title || '',
+    status: project?.status || 'planning',
     logo_url: project?.logo_url || null,
     brand_primary: project?.brand_primary || '',
     brand_secondary: project?.brand_secondary || '',
@@ -180,6 +196,16 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
     commerce_types: project?.settings?.commerce_types || ['product', 'service'],
     payment_processor: project?.settings?.payment_processor || 'stripe', // 'stripe' or 'square'
     shopify_connected: project?.settings?.shopify_connected || false,
+    // Business Profile fields - Universal source of truth for location/industry
+    city: project?.city || '',
+    state_code: project?.state_code || '',
+    country_code: project?.country_code || 'US',
+    postal_code: project?.postal_code || '',
+    address_line1: project?.address_line1 || '',
+    address_line2: project?.address_line2 || '',
+    industry: project?.industry || '',
+    industry_subcategory: project?.industry_subcategory || '',
+    google_trends_category_id: project?.google_trends_category_id || 0,
   })
   
   const [isSaving, setIsSaving] = useState(false)
@@ -202,9 +228,13 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
         resend_domain: project.settings?.resend_domain,
         resend_from_name: project.settings?.resend_from_name,
         commerce_types: project.settings?.commerce_types,
+        city: project.city,
+        state_code: project.state_code,
+        google_trends_category_id: project.google_trends_category_id,
       })
       setFormData({
         title: project.title || '',
+        status: project.status || 'planning',
         logo_url: project.logo_url || null,
         brand_primary: project.brand_primary || '',
         brand_secondary: project.brand_secondary || '',
@@ -217,6 +247,16 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
         commerce_types: Array.isArray(project.settings?.commerce_types) ? project.settings.commerce_types : [],
         payment_processor: project.settings?.payment_processor || null,
         shopify_connected: project.settings?.shopify_connected || false,
+        // Business Profile fields
+        city: project.city || '',
+        state_code: project.state_code || '',
+        country_code: project.country_code || 'US',
+        postal_code: project.postal_code || '',
+        address_line1: project.address_line1 || '',
+        address_line2: project.address_line2 || '',
+        industry: project.industry || '',
+        industry_subcategory: project.industry_subcategory || '',
+        google_trends_category_id: project.google_trends_category_id || 0,
       })
       setHasChanges(false)
     }
@@ -265,7 +305,7 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
     setLoadingMembers(true)
     try {
       // Get project members (includes user details via join)
-      const projectRes = await portalApi.get(`/projects/${project.id}/members`)
+      const projectRes = await portalApi.get(`/admin/projects/${project.id}/members`)
       const projectMembers = projectRes.data || []
       
       // Get org members (includes user details via join)
@@ -387,12 +427,23 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
       
       const response = await portalApi.patch(`/projects/${project.id}`, {
         title: formData.title,
+        status: formData.status,
         logo_url: formData.logo_url,
         brand_primary: formData.brand_primary || null,
         brand_secondary: formData.brand_secondary || null,
         domain: formData.domain || null,
         features: formData.features,
         settings: updatedSettings,
+        // Business Profile fields - Universal source of truth
+        city: formData.city || null,
+        state_code: formData.state_code || null,
+        country_code: formData.country_code || 'US',
+        postal_code: formData.postal_code || null,
+        address_line1: formData.address_line1 || null,
+        address_line2: formData.address_line2 || null,
+        industry: formData.industry || null,
+        industry_subcategory: formData.industry_subcategory || null,
+        google_trends_category_id: formData.google_trends_category_id || 0,
       })
       
       console.log('Project update response:', response.data)
@@ -438,6 +489,7 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
         // Also manually sync formData to ensure UI updates immediately
         setFormData({
           title: updatedProject.title || '',
+          status: updatedProject.status || 'planning',
           logo_url: updatedProject.logo_url || null,
           brand_primary: updatedProject.brand_primary || '',
           brand_secondary: updatedProject.brand_secondary || '',
@@ -449,6 +501,16 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
           commerce_types: Array.isArray(updatedProject.settings?.commerce_types) ? updatedProject.settings.commerce_types : [],
           payment_processor: updatedProject.settings?.payment_processor || null,
           shopify_connected: updatedProject.settings?.shopify_connected || false,
+          // Business Profile fields
+          city: updatedProject.city || '',
+          state_code: updatedProject.state_code || '',
+          country_code: updatedProject.country_code || 'US',
+          postal_code: updatedProject.postal_code || '',
+          address_line1: updatedProject.address_line1 || '',
+          address_line2: updatedProject.address_line2 || '',
+          industry: updatedProject.industry || '',
+          industry_subcategory: updatedProject.industry_subcategory || '',
+          google_trends_category_id: updatedProject.google_trends_category_id || 0,
         })
         
         toast.success('Project settings saved')
@@ -573,6 +635,7 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
     if (project) {
       setFormData({
         title: project.title || '',
+        status: project.status || 'planning',
         logo_url: project.logo_url || null,
         brand_primary: project.brand_primary || '',
         brand_secondary: project.brand_secondary || '',
@@ -635,11 +698,11 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
           )}
         </div>
         
-        {/* Top Row - Logo (fixed), Project Name, Domain, Signal (responsive) */}
-        <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_1fr_1fr] gap-4">
-          {/* Project Logo - Small square tile */}
-          <Card className="aspect-square md:h-auto">
-            <CardContent className="flex items-center justify-center p-3">
+        {/* Top Row - Logo (fixed col), Project Name + Domain fill remaining; Status + Signal row 2. 2xl: 5x1. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[160px_1fr_1fr] 2xl:grid-cols-[180px_1fr_1fr_1fr_1fr] gap-4">
+          {/* Project Logo - Fixed-size square tile; lg: col 1 only so next two tiles fill 1fr 1fr */}
+          <Card className="size-[160px] shrink-0 self-start flex-shrink-0 overflow-hidden lg:col-start-1 lg:row-start-1 2xl:col-auto 2xl:row-auto">
+            <CardContent className="flex items-center justify-center p-3 h-full min-h-0">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -734,8 +797,8 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
             </CardContent>
           </Card>
           
-          {/* Project Name */}
-          <Card>
+          {/* Project Name - lg: fills first 1fr next to logo */}
+          <Card className="min-w-0 lg:col-start-2 lg:row-start-1 2xl:col-auto 2xl:row-auto">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Project Name</CardTitle>
             </CardHeader>
@@ -748,8 +811,8 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
             </CardContent>
           </Card>
           
-          {/* Domain & Tracking */}
-          <Card>
+          {/* Domain & Tracking - lg: fills second 1fr next to logo */}
+          <Card className="min-w-0 lg:col-start-3 lg:row-start-1 2xl:col-auto 2xl:row-auto">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Globe className="h-4 w-4" />
@@ -770,8 +833,33 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
             </CardContent>
           </Card>
           
-          {/* Signal Features */}
-          <Card>
+          {/* Project status - lg: row 2, first 1fr */}
+          <Card className="min-w-0 lg:col-start-2 lg:row-start-2 2xl:col-auto 2xl:row-auto">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Project status</CardTitle>
+              <CardDescription>Lifecycle stage for this project</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Select
+                value={formData.status || 'planning'}
+                onValueChange={(value) => handleChange('status', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(PROJECT_STATUS_CONFIG).map(([key, config]) => (
+                    <SelectItem key={key} value={key}>
+                      {config.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+          
+          {/* Signal Features - lg: row 2, second 1fr */}
+          <Card className="min-w-0 lg:col-start-3 lg:row-start-2 2xl:col-auto 2xl:row-auto">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Zap className="h-4 w-4" />
@@ -915,6 +1003,17 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
             </CardContent>
           </Card>
         </div>
+        
+        {/* Business Profile - Shared component */}
+        <BusinessProfileCard
+          data={formData}
+          onChange={(updatedData) => {
+            setFormData(updatedData)
+            setHasUnsavedChanges(true)
+          }}
+          mode="edit"
+          showIndustry={true}
+        />
         
         {/* Notification Recipients - Full Width */}
         <Card>

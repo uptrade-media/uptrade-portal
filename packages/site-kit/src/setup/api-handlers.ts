@@ -256,7 +256,16 @@ export async function handleMigrate(req: NextRequest): Promise<NextResponse> {
 
   try {
     // Wrap item into ScanResults format
-    const scanResults = { forms: [item], metadata: [], widgets: [], sitemaps: [] }
+    const scanResults = { 
+      forms: [item], 
+      metadata: [], 
+      widgets: [], 
+      sitemaps: [],
+      schemas: [],
+      faqs: [],
+      analytics: [],
+      images: [],
+    }
     const options = { projectId, apiKey: authSession.accessToken || '' }
     await migrateFiles(scanResults, options)
     return NextResponse.json({ success: true })

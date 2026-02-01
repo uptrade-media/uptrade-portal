@@ -1,4 +1,28 @@
-import React from 'react';
+import React from 'react'
+import { Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+/**
+ * UptradeSpinner - Inline/section loading indicator (brand colors).
+ * Use for content areas, buttons, and any non–full-page loading.
+ * For full-page loading use default UptradeLoading.
+ */
+export function UptradeSpinner({ size = 'md', label, className }) {
+  const sizeClasses = { sm: 'h-4 w-4', md: 'h-8 w-8', lg: 'h-10 w-10' }
+  return (
+    <div
+      className={cn('flex flex-col items-center justify-center gap-2', className)}
+      role="status"
+      aria-label={label || 'Loading'}
+    >
+      <Loader2
+        className={cn('animate-spin text-[var(--brand-primary)]', sizeClasses[size])}
+        aria-hidden
+      />
+      {label && <p className="text-sm text-muted-foreground">{label}</p>}
+    </div>
+  )
+}
 
 const UptradeLoading = () => {
   return (
@@ -99,6 +123,7 @@ const UptradeLoading = () => {
       </div>
     </>
   );
-};
+}
 
-export default UptradeLoading;
+UptradeLoading.Spinner = UptradeSpinner
+export default UptradeLoading

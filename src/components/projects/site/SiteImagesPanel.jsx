@@ -1,8 +1,8 @@
 /**
  * SiteImagesPanel - Manage image slots for site-kit
  */
-import { Image, Upload, Sparkles, Grid, List, MoreVertical, Search, Trash2, Edit, X, Check } from 'lucide-react'
-import { useState } from 'react'
+import { Image, Upload, Sparkles, Grid, List, MoreVertical, Search, Trash2, Edit, X, Check, Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,11 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { useSiteManagementStore } from '@/lib/site-management-store'
+import { 
+  useCreateSiteImage, 
+  useUpdateSiteImage, 
+  useDeleteSiteImage 
+} from '@/lib/hooks'
 import {
   Dialog,
   DialogContent,
@@ -33,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useSEOAIGeneration } from '@/lib/use-seo-ai-generation'
 
 const CATEGORIES = [
   { value: 'brand', label: 'Brand' },
@@ -52,7 +57,11 @@ export default function SiteImagesPanel({ project, images = [] }) {
   const [editingImage, setEditingImage] = useState(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(null)
-  const store = useSiteManagementStore()
+  
+  // React Query mutations
+  const createImageMutation = useCreateSiteImage()
+  const updateImageMutation = useUpdateSiteImage()
+  const deleteImageMutation = useDeleteSiteImage()
   
   // Group images by category
   const groupedImages = images.reduce((acc, img) => {
@@ -71,7 +80,7 @@ export default function SiteImagesPanel({ project, images = [] }) {
   const handleDelete = async (imageId) => {
     setIsDeleting(imageId)
     try {
-      await store.deleteImage(imageId)
+      await deleteImageMutation.mutateAsync({ id: imageId, projectId: project.id })
       toast.success('Image slot removed')
     } catch (error) {
       toast.error('Failed to delete image')
@@ -81,12 +90,8 @@ export default function SiteImagesPanel({ project, images = [] }) {
   }
   
   const handleCategorize = async () => {
-    try {
-      await store.triggerImageCategorization()
-      toast.success('Image categorization started')
-    } catch (error) {
-      toast.error('Failed to start categorization')
-    }
+    // AI categorization would typically be a separate endpoint
+    toast.info('Image categorization coming soon')
   }
   
   if (images.length === 0) {
@@ -112,7 +117,7 @@ export default function SiteImagesPanel({ project, images = [] }) {
           open={isCreateOpen} 
           onOpenChange={setIsCreateOpen}
           onSubmit={async (data) => {
-            await store.createImage(data)
+            await createImageMutation.mutateAsync({ projectId: project.id, data })
             toast.success('Image slot created')
             setIsCreateOpen(false)
           }}
@@ -283,7 +288,7 @@ export default function SiteImagesPanel({ project, images = [] }) {
         open={isCreateOpen} 
         onOpenChange={setIsCreateOpen}
         onSubmit={async (data) => {
-          await store.createImage(data)
+          await createImageMutation.mutateAsync({ projectId: project.id, data })
           toast.success('Image slot created')
           setIsCreateOpen(false)
         }}
@@ -295,7 +300,11 @@ export default function SiteImagesPanel({ project, images = [] }) {
         open={!!editingImage}
         onOpenChange={(open) => !open && setEditingImage(null)}
         onSubmit={async (data) => {
-          await store.updateImage(editingImage.id, data)
+          await updateImageMutation.mutateAsync({ 
+            id: editingImage.id, 
+            projectId: project.id, 
+            data 
+          })
           toast.success('Image updated')
           setEditingImage(null)
         }}
@@ -316,7 +325,21 @@ function CreateImageDialog({ open, onOpenChange, onSubmit }) {
     ai_category: 'other',
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
+  const { optimizeAltText, suggestions, isGenerating, clearSuggestions, hasAccess } = useSEOAIGeneration()
+
+  const handleOptimizeAlt = async () => {
+    try {
+      await optimizeAltText({
+        pagePath: formData.page_path || '/',
+        slotId: formData.slot_id || undefined,
+        currentAlt: formData.alt_text || undefined,
+        count: 3,
+      })
+    } catch (e) {
+      toast.error(e?.message || 'Failed to get alt text suggestions from Signal')
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!formData.slot_id) return
@@ -385,7 +408,22 @@ function CreateImageDialog({ open, onOpenChange, onSubmit }) {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="alt_text">Alt Text</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="alt_text">Alt Text</Label>
+              {hasAccess && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={handleOptimizeAlt}
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {isGenerating ? 'Generating...' : 'Optimize with Signal'}
+                </Button>
+              )}
+            </div>
             <Textarea
               id="alt_text"
               placeholder="Descriptive alt text for accessibility"
@@ -393,6 +431,26 @@ function CreateImageDialog({ open, onOpenChange, onSubmit }) {
               onChange={(e) => setFormData({ ...formData, alt_text: e.target.value })}
               rows={2}
             />
+            {suggestions?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, alt_text: s.text }))
+                      clearSuggestions()
+                    }}
+                    className={cn(
+                      'rounded-md border px-2 py-1 text-xs text-left transition-colors',
+                      'bg-muted/50 hover:bg-muted border-border'
+                    )}
+                  >
+                    {s.text || '(empty)'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           
           <DialogFooter>
@@ -417,9 +475,9 @@ function EditImageDialog({ image, open, onOpenChange, onSubmit, onDelete }) {
     ai_category: 'other',
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
-  // Update form when image changes
-  useState(() => {
+  const { optimizeAltText, suggestions, isGenerating, clearSuggestions, hasAccess } = useSEOAIGeneration()
+
+  useEffect(() => {
     if (image) {
       setFormData({
         slot_id: image.slot_id || '',
@@ -429,7 +487,16 @@ function EditImageDialog({ image, open, onOpenChange, onSubmit, onDelete }) {
       })
     }
   }, [image])
-  
+
+  const handleOptimizeAlt = async () => {
+    await optimizeAltText({
+      pagePath: formData.page_path || '/',
+      slotId: formData.slot_id,
+      currentAlt: formData.alt_text || undefined,
+      count: 3,
+    })
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setIsSubmitting(true)
@@ -496,13 +563,48 @@ function EditImageDialog({ image, open, onOpenChange, onSubmit, onDelete }) {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="edit_alt_text">Alt Text</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="edit_alt_text">Alt Text</Label>
+              {hasAccess && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={handleOptimizeAlt}
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {isGenerating ? 'Generating...' : 'Optimize with Signal'}
+                </Button>
+              )}
+            </div>
             <Textarea
               id="edit_alt_text"
               value={formData.alt_text}
               onChange={(e) => setFormData({ ...formData, alt_text: e.target.value })}
               rows={2}
             />
+            {suggestions?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, alt_text: s.text }))
+                      clearSuggestions()
+                    }}
+                    className={cn(
+                      'rounded-md border px-2 py-1 text-xs text-left transition-colors',
+                      'bg-muted/50 hover:bg-muted border-border'
+                    )}
+                  >
+                    {s.text || '(empty)'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           
           <DialogFooter className="flex justify-between">

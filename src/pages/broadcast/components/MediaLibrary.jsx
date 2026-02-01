@@ -1,5 +1,5 @@
 // src/pages/broadcast/components/MediaLibrary.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Palette,
   Hash,
@@ -22,6 +22,7 @@ import {
   FileImage,
   FileVideo,
   File,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,59 +39,10 @@ import {
 import { cn } from '@/lib/utils';
 import { useBroadcastStore } from '@/stores/broadcastStore';
 import useAuthStore from '@/lib/auth-store';
+import { filesApi } from '@/lib/portal-api';
 import { TemplatesGrid } from './TemplatesGrid';
 import { HashtagSets } from './HashtagSets';
-import { TrendingSounds } from './TrendingSounds';
 import { toast } from 'sonner';
-
-// Mock data for media assets
-const MOCK_MEDIA = [
-  {
-    id: '1',
-    name: 'Product Shot 1.jpg',
-    type: 'image',
-    url: 'https://via.placeholder.com/400x400',
-    thumbnail: 'https://via.placeholder.com/200x200',
-    size: 245678,
-    dimensions: '1080x1080',
-    createdAt: new Date('2025-01-15'),
-    folder: 'products',
-  },
-  {
-    id: '2',
-    name: 'Promo Video.mp4',
-    type: 'video',
-    url: 'https://via.placeholder.com/400x400',
-    thumbnail: 'https://via.placeholder.com/200x200',
-    size: 5678900,
-    dimensions: '1920x1080',
-    duration: 30,
-    createdAt: new Date('2025-01-14'),
-    folder: 'videos',
-  },
-  {
-    id: '3',
-    name: 'Team Photo.jpg',
-    type: 'image',
-    url: 'https://via.placeholder.com/400x400',
-    thumbnail: 'https://via.placeholder.com/200x200',
-    size: 189234,
-    dimensions: '1200x800',
-    createdAt: new Date('2025-01-13'),
-    folder: 'team',
-  },
-  {
-    id: '4',
-    name: 'Story Background.png',
-    type: 'image',
-    url: 'https://via.placeholder.com/400x400',
-    thumbnail: 'https://via.placeholder.com/200x200',
-    size: 89000,
-    dimensions: '1080x1920',
-    createdAt: new Date('2025-01-12'),
-    folder: 'stories',
-  },
-];
 
 const FOLDERS = [
   { id: 'all', name: 'All Media', count: 24 },
@@ -206,7 +158,52 @@ function MediaGrid({ searchQuery, onSelectMedia }) {
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [viewMode, setViewMode] = useState('grid');
   const [isDragging, setIsDragging] = useState(false);
-  const [media] = useState(MOCK_MEDIA);
+  const [media, setMedia] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { activeProjectId } = useAuthStore();
+
+  // Fetch media from files API
+  useEffect(() => {
+    async function fetchMedia() {
+      if (!activeProjectId) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        const response = await filesApi.listFiles({
+          project_id: activeProjectId,
+          content_type: 'image,video', // Only images and videos for media library
+          folder_path: selectedFolder === 'all' ? undefined : selectedFolder,
+        });
+        
+        // Transform API response to expected format
+        const files = response?.data?.files || response?.files || [];
+        const transformedMedia = files.map(file => ({
+          id: file.id,
+          name: file.name || file.file_name,
+          type: file.content_type?.startsWith('video/') ? 'video' : 'image',
+          url: file.url || file.public_url,
+          thumbnail: file.thumbnail_url || file.url || file.public_url,
+          size: file.size || file.file_size || 0,
+          dimensions: file.metadata?.dimensions || 'Unknown',
+          duration: file.metadata?.duration,
+          createdAt: new Date(file.created_at),
+          folder: file.folder_path || 'root',
+        }));
+        
+        setMedia(transformedMedia);
+      } catch (error) {
+        console.error('Error fetching media:', error);
+        toast.error('Failed to load media files');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchMedia();
+  }, [activeProjectId, selectedFolder]);
 
   const filteredMedia = media.filter((asset) => {
     const matchesSearch = !searchQuery ||
@@ -296,19 +293,29 @@ function MediaGrid({ searchQuery, onSelectMedia }) {
           </div>
         </div>
 
-        {/* Grid */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {filteredMedia.map((asset) => (
-            <MediaCard
-              key={asset.id}
-              asset={asset}
-              onSelect={onSelectMedia}
-              onDelete={(asset) => toast.success(`Deleted ${asset.name}`)}
-            />
-          ))}
-        </div>
+        {/* Loading State */}
+        {isLoading && (
+          <div className="flex h-40 flex-col items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--brand-primary)]" />
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">Loading media...</p>
+          </div>
+        )}
 
-        {filteredMedia.length === 0 && (
+        {/* Grid */}
+        {!isLoading && (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {filteredMedia.map((asset) => (
+              <MediaCard
+                key={asset.id}
+                asset={asset}
+                onSelect={onSelectMedia}
+                onDelete={(asset) => toast.success(`Deleted ${asset.name}`)}
+              />
+            ))}
+          </div>
+        )}
+
+        {!isLoading && filteredMedia.length === 0 && (
           <div className="flex h-40 flex-col items-center justify-center text-center">
             <Image className="mb-3 h-12 w-12 text-[var(--text-tertiary)]" />
             <p className="text-[var(--text-secondary)]">No media found</p>
@@ -324,7 +331,6 @@ function MediaGrid({ searchQuery, onSelectMedia }) {
 
 export function MediaLibrary({ searchQuery, onUseTemplate, onSelectMedia }) {
   const [activeTab, setActiveTab] = useState('templates');
-  const [showTrendingSounds, setShowTrendingSounds] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -345,16 +351,6 @@ export function MediaLibrary({ searchQuery, onUseTemplate, onSelectMedia }) {
               Hashtag Sets
             </TabsTrigger>
           </TabsList>
-
-          {/* Quick access to Trending Sounds */}
-          <Button
-            variant="outline"
-            onClick={() => setShowTrendingSounds(true)}
-            className="border-[var(--glass-border)] text-[var(--text-secondary)]"
-          >
-            <Music className="mr-2 h-4 w-4 text-[var(--brand-primary)]" />
-            Trending Sounds
-          </Button>
         </div>
 
         <TabsContent value="templates" className="mt-6">
@@ -375,15 +371,6 @@ export function MediaLibrary({ searchQuery, onUseTemplate, onSelectMedia }) {
           <HashtagSets />
         </TabsContent>
       </Tabs>
-
-      {/* Trending Sounds Dialog */}
-      <TrendingSounds
-        open={showTrendingSounds}
-        onClose={() => setShowTrendingSounds(false)}
-        onSelect={(sound) => {
-          toast.success(`Selected: ${sound.name}`);
-        }}
-      />
     </div>
   );
 }

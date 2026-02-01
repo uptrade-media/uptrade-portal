@@ -1,8 +1,12 @@
 // src/components/seo/SEOTechnicalAudit.jsx
 // Technical SEO Hub - Core Web Vitals, Indexing, Schema, Internal Links
-import { useState, useEffect, useMemo } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useState, useMemo, useEffect } from 'react'
+import { toast } from 'sonner'
+import { useCwvSummary, useSeoPages, seoKeys } from '@/lib/hooks/use-seo'
 import { useSignalAccess } from '@/lib/signal-access'
+import { seoApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
+import { seoPageKeys } from '@/hooks/seo'
 import SignalUpgradeCard from './signal/SignalUpgradeCard'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -32,9 +36,9 @@ import {
   FileX,
   CheckCircle2,
   AlertCircle,
-  Loader2,
   ChevronRight
 } from 'lucide-react'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import { cn } from '@/lib/utils'
 
 /**
@@ -45,6 +49,7 @@ export default function SEOTechnicalAudit({
   projectId, 
   pages = [], 
   cwvSummary = null,
+  domain = null,
   onRefresh 
 }) {
   const { hasAccess: hasSignalAccess } = useSignalAccess()
@@ -58,46 +63,66 @@ export default function SEOTechnicalAudit({
     )
   }
 
-  const { 
-    fetchCwvSummary,
-    crawlSitemap,
-    fetchPages
-  } = useSeoStore()
-  
+  const queryClient = useQueryClient()
+  const { refetch: refetchCwv } = useCwvSummary(projectId, { enabled: false })
+
+  // Pull seo_pages from API when parent didn't pass any (e.g. site-kit already posted pages)
+  const { data: pagesFromApi, isLoading: pagesLoading } = useSeoPages(projectId, { limit: 500 }, { enabled: !!projectId })
+
   const [activeTab, setActiveTab] = useState('overview')
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isCrawling, setIsCrawling] = useState(false)
+
+  const handleCrawlSitemap = async () => {
+    if (!projectId) return
+    setIsCrawling(true)
+    try {
+      await seoApi.crawlSitemap(projectId)
+      queryClient.invalidateQueries({ queryKey: seoKeys.pages(projectId) })
+      queryClient.invalidateQueries({ queryKey: seoPageKeys.list(projectId) })
+      await refetchCwv()
+      onRefresh?.()
+    } finally {
+      setIsCrawling(false)
+    }
+  }
+
+  // Use pages prop if provided and non-empty; otherwise use seo_pages from API (e.g. from site-kit)
+  const propList = Array.isArray(pages) ? pages : (pages?.pages ?? [])
+  const apiList = Array.isArray(pagesFromApi?.pages) ? pagesFromApi.pages : (pagesFromApi?.data ?? [])
+  const pageList = (propList.length > 0 ? propList : apiList) || []
 
   // Calculate technical audit data from existing page data
   const auditData = useMemo(() => {
-    if (!pages.length) {
+    if (!pageList.length) {
       return null
     }
 
     // Indexing Analysis
-    const indexedPages = pages.filter(p => p.index_status === 'indexed' || p.is_indexed)
-    const notIndexedPages = pages.filter(p => p.index_status === 'not_indexed' || (!p.is_indexed && !p.has_noindex))
-    const noindexPages = pages.filter(p => p.has_noindex)
-    const blockedPages = pages.filter(p => p.robots_blocked)
-    const errorPages = pages.filter(p => p.http_status >= 400)
-    const redirectPages = pages.filter(p => p.http_status >= 300 && p.http_status < 400)
+    const indexedPages = pageList.filter(p => p.index_status === 'indexed' || p.is_indexed)
+    const notIndexedPages = pageList.filter(p => p.index_status === 'not_indexed' || (!p.is_indexed && !p.has_noindex))
+    const noindexPages = pageList.filter(p => p.has_noindex)
+    const blockedPages = pageList.filter(p => p.robots_blocked)
+    const errorPages = pageList.filter(p => p.http_status >= 400)
+    const redirectPages = pageList.filter(p => p.http_status >= 300 && p.http_status < 400)
 
     // Content Analysis
-    const missingTitles = pages.filter(p => !p.title || p.title.trim() === '')
-    const missingDescriptions = pages.filter(p => !p.meta_description || p.meta_description.trim() === '')
-    const missingH1 = pages.filter(p => !p.h1)
-    const duplicateTitles = findDuplicates(pages.map(p => p.title).filter(Boolean))
-    const thinContent = pages.filter(p => p.word_count && p.word_count < 300)
+    const missingTitles = pageList.filter(p => !p.title || p.title.trim() === '')
+    const missingDescriptions = pageList.filter(p => !p.meta_description || p.meta_description.trim() === '')
+    const missingH1 = pageList.filter(p => !p.h1)
+    const duplicateTitles = findDuplicates(pageList.map(p => p.title).filter(Boolean))
+    const thinContent = pageList.filter(p => p.word_count && p.word_count < 300)
 
     // Schema Analysis
-    const pagesWithSchema = pages.filter(p => p.has_schema || p.schema_types?.length > 0)
-    const schemaTypes = [...new Set(pages.flatMap(p => p.schema_types || []))]
+    const pagesWithSchema = pageList.filter(p => p.has_schema || p.schema_types?.length > 0)
+    const schemaTypes = [...new Set(pageList.flatMap(p => p.schema_types || []))]
 
     // Internal Linking Analysis
-    const orphanPages = pages.filter(p => (p.internal_links_in || 0) === 0)
-    const avgInternalLinks = pages.length > 0 
-      ? pages.reduce((sum, p) => sum + (p.internal_links_in || 0), 0) / pages.length 
+    const orphanPages = pageList.filter(p => (p.internal_links_in || 0) === 0)
+    const avgInternalLinks = pageList.length > 0
+      ? pageList.reduce((sum, p) => sum + (p.internal_links_in || 0), 0) / pageList.length
       : 0
-    const wellLinkedPages = pages.filter(p => (p.internal_links_in || 0) >= 5)
+    const wellLinkedPages = pageList.filter(p => (p.internal_links_in || 0) >= 5)
 
     // CWV Analysis
     const cwvStatus = getCwvStatus(cwvSummary)
@@ -113,7 +138,7 @@ export default function SEOTechnicalAudit({
       score -= Math.min(25, errorPages.length * 5)
       issues.push({ type: 'error', message: `${errorPages.length} pages returning errors (4xx/5xx)`, count: errorPages.length })
     }
-    if (notIndexedPages.length > pages.length * 0.3) {
+    if (notIndexedPages.length > pageList.length * 0.3) {
       score -= 15
       issues.push({ type: 'indexing', message: `${notIndexedPages.length} pages not indexed`, count: notIndexedPages.length })
     }
@@ -151,7 +176,7 @@ export default function SEOTechnicalAudit({
     if (pagesWithSchema.length >= pages.length * 0.5) passed.push('Good schema coverage')
     if (cwvStatus === 'good') passed.push('Core Web Vitals passing')
     if (orphanPages.length === 0) passed.push('No orphan pages')
-    if (indexedPages.length >= pages.length * 0.8) passed.push('Good indexing coverage')
+    if (indexedPages.length >= pageList.length * 0.8) passed.push('Good indexing coverage')
 
     return {
       score: Math.max(0, Math.min(100, score)),
@@ -159,7 +184,7 @@ export default function SEOTechnicalAudit({
       warnings,
       passed,
       indexing: {
-        total: pages.length,
+        total: pageList.length,
         indexed: indexedPages.length,
         notIndexed: notIndexedPages.length,
         noindex: noindexPages.length,
@@ -177,8 +202,8 @@ export default function SEOTechnicalAudit({
       },
       schema: {
         pagesWithSchema: pagesWithSchema.length,
-        totalPages: pages.length,
-        coverage: pages.length > 0 ? (pagesWithSchema.length / pages.length * 100).toFixed(0) : 0,
+        totalPages: pageList.length,
+        coverage: pageList.length > 0 ? (pagesWithSchema.length / pageList.length * 100).toFixed(0) : 0,
         types: schemaTypes
       },
       internalLinks: {
@@ -188,16 +213,13 @@ export default function SEOTechnicalAudit({
       },
       cwv: cwvSummary
     }
-  }, [pages, cwvSummary])
+  }, [pageList, cwvSummary])
 
   const handleRefresh = async () => {
     if (!projectId) return
     setIsRefreshing(true)
     try {
-      await Promise.all([
-        fetchPages(projectId, { limit: 100 }),
-        fetchCwvSummary(projectId)
-      ])
+      await refetchCwv()
       onRefresh?.()
     } finally {
       setIsRefreshing(false)
@@ -226,8 +248,8 @@ export default function SEOTechnicalAudit({
     return 'F'
   }
 
-  // Empty state
-  if (!pages.length && !isRefreshing) {
+  // Empty state: only show "Crawl sitemap" when we have no pages and we're not still loading seo_pages from API
+  if (!pageList.length && !isRefreshing && !pagesLoading) {
     return (
       <Card className="border-dashed">
         <CardContent className="py-12 text-center">
@@ -236,12 +258,25 @@ export default function SEOTechnicalAudit({
           <p className="text-muted-foreground mb-4 max-w-md mx-auto">
             Crawl your sitemap to analyze technical SEO factors like Core Web Vitals, indexing, and internal linking.
           </p>
-          <Button onClick={() => crawlSitemap(projectId)}>
-            <Globe className="mr-2 h-4 w-4" />
-            Crawl Sitemap
+          <Button onClick={handleCrawlSitemap} disabled={isCrawling}>
+            {isCrawling ? (
+              <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
+            ) : (
+              <Globe className="mr-2 h-4 w-4" />
+            )}
+            {isCrawling ? 'Crawling…' : 'Crawl Sitemap'}
           </Button>
         </CardContent>
       </Card>
+    )
+  }
+
+  // Loading existing pages from API (e.g. site-kit already posted)
+  if (!pageList.length && pagesLoading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <UptradeSpinner size="lg" message="Loading pages…" />
+      </div>
     )
   }
 
@@ -261,7 +296,7 @@ export default function SEOTechnicalAudit({
           disabled={isRefreshing}
         >
           {isRefreshing ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
           ) : (
             <RefreshCw className="h-4 w-4 mr-2" />
           )}
@@ -455,17 +490,17 @@ export default function SEOTechnicalAudit({
 
         {/* Core Web Vitals Tab */}
         <TabsContent value="cwv" className="space-y-4">
-          <CwvSection cwvSummary={auditData?.cwv} />
+          <CwvSection cwvSummary={auditData?.cwv} projectId={projectId} />
         </TabsContent>
 
         {/* Indexing Tab */}
         <TabsContent value="indexing" className="space-y-4">
-          <IndexingSection data={auditData?.indexing} />
+          <IndexingSection data={auditData?.indexing} projectId={projectId} domain={domain} />
         </TabsContent>
 
         {/* Internal Links Tab */}
         <TabsContent value="links" className="space-y-4">
-          <InternalLinksSection data={auditData?.internalLinks} pages={pages} />
+          <InternalLinksSection data={auditData?.internalLinks} pages={pageList} />
         </TabsContent>
       </Tabs>
     </div>
@@ -496,17 +531,44 @@ function MetricCard({ icon: Icon, label, value, status }) {
   )
 }
 
-function CwvSection({ cwvSummary }) {
+function CwvSection({ cwvSummary, projectId }) {
+  const [isRunning, setIsRunning] = useState(false)
+  const queryClient = useQueryClient()
+  
+  const handleRunSweep = async () => {
+    if (!projectId) return
+    setIsRunning(true)
+    try {
+      await seoApi.checkAllPagesCwv(projectId)
+      queryClient.invalidateQueries({ queryKey: ['seo'] })
+    } finally {
+      setIsRunning(false)
+    }
+  }
+  
   if (!cwvSummary) {
     return (
       <Card className="border-dashed">
         <CardContent className="py-8 text-center">
           <Zap className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground mb-4">
             Core Web Vitals data not yet available. 
             <br />
-            <span className="text-sm">Data is collected from Google PageSpeed Insights.</span>
+            <span className="text-sm">Run a PageSpeed sweep to collect performance data.</span>
           </p>
+          <Button onClick={handleRunSweep} disabled={isRunning || !projectId}>
+            {isRunning ? (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                Running Sweep...
+              </>
+            ) : (
+              <>
+                <Zap className="mr-2 h-4 w-4" />
+                Run PageSpeed Sweep
+              </>
+            )}
+          </Button>
         </CardContent>
       </Card>
     )
@@ -549,7 +611,28 @@ function CwvSection({ cwvSummary }) {
 
   return (
     <div className="space-y-4">
-      {/* Mobile vs Desktop Toggle would go here */}
+      {/* Header with Re-run Button */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">Core Web Vitals</h3>
+          <p className="text-sm text-muted-foreground">Performance metrics from Google PageSpeed Insights</p>
+        </div>
+        <Button variant="outline" onClick={handleRunSweep} disabled={isRunning}>
+          {isRunning ? (
+            <>
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              Running...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Re-run Sweep
+            </>
+          )}
+        </Button>
+      </div>
+      
+      {/* Mobile vs Desktop Scores */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Mobile Card */}
         <Card>
@@ -722,7 +805,70 @@ function CwvMetricCard({ metric, mobileValue, desktopValue }) {
   )
 }
 
-function IndexingSection({ data }) {
+function IndexingSection({ data, projectId, domain }) {
+  const [quota, setQuota] = useState(null)
+  const [submitting, setSubmitting] = useState(null) // url or 'bulk'
+  const notIndexedPages = data?.pages?.notIndexed || []
+
+  const baseUrl = useMemo(() => {
+    if (!domain) return null
+    const d = domain.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    return d ? `https://${d}` : null
+  }, [domain])
+
+  const getFullUrl = (page) => {
+    if (page.url && (page.url.startsWith('http://') || page.url.startsWith('https://'))) return page.url
+    if (!baseUrl) return null
+    const path = page.path || (page.url || '').replace(/^https?:\/\/[^/]+/, '') || '/'
+    return path.startsWith('/') ? `${baseUrl}${path}` : `${baseUrl}/${path}`
+  }
+
+  useEffect(() => {
+    if (!projectId) return
+    seoApi.getIndexingSubmitQuota(projectId).then(setQuota).catch(() => setQuota(null))
+  }, [projectId, submitting])
+
+  const handleSubmitOne = async (page) => {
+    const url = getFullUrl(page)
+    if (!url || !projectId) {
+      if (!baseUrl) toast.error('Configure project domain to submit URLs')
+      return
+    }
+    setSubmitting(url)
+    try {
+      await seoApi.submitUrlForIndexing(projectId, url)
+      toast.success('URL submitted to Google for indexing')
+    } catch (e) {
+      toast.error(e?.response?.data?.message || e?.message || 'Submit failed')
+    } finally {
+      setSubmitting(null)
+    }
+  }
+
+  const handleSubmitBulk = async () => {
+    if (!projectId || !baseUrl || notIndexedPages.length === 0) {
+      if (!baseUrl) toast.error('Configure project domain to submit URLs')
+      return
+    }
+    const urls = notIndexedPages.map(getFullUrl).filter(Boolean)
+    const limit = Math.min(urls.length, quota?.remaining ?? 200)
+    if (limit === 0) {
+      toast.error('No indexing quota remaining today (200/day). Try again tomorrow.')
+      return
+    }
+    const toSubmit = urls.slice(0, limit)
+    setSubmitting('bulk')
+    try {
+      const result = await seoApi.submitBulkForIndexing(projectId, toSubmit)
+      const submitted = result?.submitted ?? result?.results?.filter(r => r.success)?.length ?? 0
+      toast.success(`Submitted ${submitted} URL(s) to Google for indexing`)
+    } catch (e) {
+      toast.error(e?.response?.data?.message || e?.message || 'Bulk submit failed')
+    } finally {
+      setSubmitting(null)
+    }
+  }
+
   if (!data) return null
 
   const sections = [
@@ -734,6 +880,43 @@ function IndexingSection({ data }) {
 
   return (
     <div className="space-y-4">
+      {/* Google Indexing API quota */}
+      {projectId && (
+        <Card className="border-muted">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              Google Indexing API
+            </CardTitle>
+            <CardDescription>
+              Submit URLs for indexing (max 200/day per property). Quota resets at midnight UTC.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-4">
+            {quota != null && (
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">
+                  {quota.remaining} of {quota.limit ?? 200} remaining today
+                </Badge>
+              </div>
+            )}
+            {data.notIndexed > 0 && baseUrl && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!!submitting || (quota != null && quota.remaining === 0)}
+                onClick={handleSubmitBulk}
+              >
+                {submitting === 'bulk' ? (
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Submit all not indexed to Google
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Coverage Overview */}
       <Card>
         <CardHeader>
@@ -796,22 +979,38 @@ function IndexingSection({ data }) {
               Pages Not Indexed ({data.notIndexed})
             </CardTitle>
             <CardDescription>
-              These pages are not appearing in Google search results
+              These pages are not appearing in Google search results. Use the Google Indexing API to request indexing.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2 max-h-64 overflow-y-auto">
-              {data.pages?.notIndexed?.slice(0, 10).map((page, i) => (
-                <div key={i} className="flex items-center justify-between p-2 bg-muted/30 rounded">
-                  <span className="text-sm text-foreground truncate flex-1">
-                    {page.path || page.url}
-                  </span>
-                  <Button variant="ghost" size="sm" className="text-xs">
-                    Request Index
-                    <ChevronRight className="h-3 w-3 ml-1" />
-                  </Button>
-                </div>
-              ))}
+              {data.pages?.notIndexed?.slice(0, 10).map((page, i) => {
+                const fullUrl = getFullUrl(page)
+                const canSubmit = projectId && fullUrl
+                return (
+                  <div key={i} className="flex items-center justify-between p-2 bg-muted/30 rounded gap-2">
+                    <span className="text-sm text-foreground truncate flex-1">
+                      {page.path || page.url}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs shrink-0"
+                      disabled={!canSubmit || !!submitting}
+                      onClick={() => handleSubmitOne(page)}
+                    >
+                      {submitting === fullUrl ? (
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          Request Index
+                          <ChevronRight className="h-3 w-3 ml-1" />
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )
+              })}
               {data.notIndexed > 10 && (
                 <p className="text-sm text-muted-foreground text-center pt-2">
                   +{data.notIndexed - 10} more pages

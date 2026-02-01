@@ -165,3 +165,80 @@ export type {
   ReviewStats,
   TestimonialSectionProps,
 } from './reputation'
+
+// Sync module exports (Booking Widget)
+export {
+  BookingWidget,
+  fetchBookingTypes,
+  fetchBookingTypeDetails,
+  fetchAvailability,
+  fetchAvailableDates,
+  createSlotHold,
+  releaseSlotHold,
+  createBooking,
+  detectTimezone,
+  formatTime as formatBookingTime,
+  formatDate as formatBookingDate,
+  formatDuration,
+} from './sync'
+export type {
+  BookingType,
+  TimeSlot,
+  Host,
+  SlotHold,
+  BookingResult,
+  BookingWidgetProps,
+  GuestInfo,
+  SyncWidgetConfig,
+} from './sync'
+
+// LLM Visibility module exports (Answer Engine Optimization / Sonor AI Visibility)
+export {
+  // llms.txt generation
+  generateLLMsTxt,
+  generateLLMsFullTxt,
+  createLLMsTxtHandler,
+  createLLMsFullTxtHandler,
+  // Speakable schema
+  SpeakableSchema,
+  createSpeakableSchema,
+  getSpeakableSelectorsForPage,
+  DEFAULT_SPEAKABLE_SELECTORS,
+  // AEO Components (Sonor AI Visibility)
+  AEOBlock,
+  AEOSummary,
+  AEODefinition,
+  AEOSteps,
+  AEOStep,
+  AEOComparison,
+  AEOClaim,
+  AEOEntity,
+  AEOProvenanceList,
+  AEOCitedContent,
+  // API functions
+  getLLMsData,
+  getBusinessInfo,
+  getServices as getLLMServices,
+  getFAQItems as getLLMFAQItems,
+  getPageSummaries,
+} from './llms'
+export type {
+  LLMBusinessInfo,
+  LLMContactInfo,
+  LLMService,
+  LLMFAQItem,
+  LLMPageSummary,
+  GenerateLLMSTxtOptions,
+  LLMSTxtContent,
+  SpeakableConfig,
+  SpeakableSchemaProps,
+  AEOBlockProps,
+  AEOSummaryProps,
+  AEODefinitionProps,
+  AEOClaimProps,
+  AEOEntityProps,
+  ContentProvenance,
+  AEOProvenanceListProps,
+  AEOCitedContentProps,
+  LLMsDataResponse,
+} from './llms'

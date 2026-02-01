@@ -1,11 +1,12 @@
 /**
  * Signal Access Hooks
  * 
- * Signal AI must be explicitly enabled at the organization level.
- * Usage is tracked and billed.
+ * Signal AI can be enabled at:
+ * 1. Organization level (signal_enabled) - all projects get Signal
+ * 2. Project level (features includes 'signal') - specific project has Signal
  * 
  * Access is restricted if:
- * - Signal is not enabled for the organization
+ * - Neither org nor project has Signal enabled
  * - Org has an unpaid Signal invoice > 15 days overdue
  * 
  * @see supabase/migrations/20260122_signal_usage_invoicing.sql
@@ -15,7 +16,7 @@ import useAuthStore from './auth-store'
 
 /**
  * Get the current user's Signal access context.
- * Checks org-level signal_enabled setting first.
+ * Checks both org-level and project-level Signal settings.
  * 
  * @returns {SignalAccessContext}
  */
@@ -33,33 +34,37 @@ export const useSignalAccess = () => {
   // Check if Signal is enabled at org level
   const orgSignalEnabled = currentOrg?.signal_enabled || currentOrg?.signalEnabled || false
   
+  // Check if Signal is enabled at project level (features array)
+  const projectFeatures = currentProject?.features || []
+  const projectSignalEnabled = Array.isArray(projectFeatures) && projectFeatures.includes('signal')
+  
   // Check if org is restricted due to unpaid invoice
   const isRestricted = currentOrg?.is_access_restricted === true
   
-  // Access granted only if Signal is enabled AND not restricted
-  const hasAccess = orgSignalEnabled && !isRestricted
+  // Access granted if Signal is enabled at org OR project level, AND not restricted
+  const hasAccess = (orgSignalEnabled || projectSignalEnabled) && !isRestricted
   
   return {
-    // Core access flags - Based on org signal_enabled setting
-    hasAccess,                      // User has Signal access (org enabled + not restricted)
+    // Core access flags - Based on org OR project signal setting
+    hasAccess,                      // User has Signal access (enabled + not restricted)
     hasOrgSignal: orgSignalEnabled, // Signal enabled at org level
-    hasCurrentProjectSignal: orgSignalEnabled, // Signal for current project (inherits from org)
+    hasCurrentProjectSignal: projectSignalEnabled || orgSignalEnabled, // Signal for current project
     isAdmin,                        // Is admin with override access
     isRestricted,                   // Org is restricted for unpaid invoice
     
-    // Legacy flags - now properly check org settings
+    // Legacy flags - now properly check org AND project settings
     orgActuallyHasSignal: orgSignalEnabled,
-    projectActuallyHasSignal: orgSignalEnabled,
+    projectActuallyHasSignal: projectSignalEnabled || orgSignalEnabled,
     
-    // Feature-specific access - all depend on org signal_enabled
+    // Feature-specific access - depend on org OR project signal
     canUseEcho: hasAccess,          // Echo available if Signal enabled
     canUseSyncSignal: hasAccess,    // Sync Signal available if Signal enabled
     canUseProjectSignal: hasAccess, // Project module AI features available if Signal enabled
     
     // Scope information
-    scope: isRestricted ? 'restricted' : (orgSignalEnabled ? 'full' : 'disabled'),
-    signalEnabledProjects: orgSignalEnabled ? (availableProjects || []) : [],
-    signalProjectIds: orgSignalEnabled ? (availableProjects || []).map(p => p.id) : [],
+    scope: isRestricted ? 'restricted' : (hasAccess ? 'full' : 'disabled'),
+    signalEnabledProjects: hasAccess ? (availableProjects || []) : [],
+    signalProjectIds: hasAccess ? (availableProjects || []).map(p => p.id) : [],
     
     // Context
     isOrgLevel: accessLevel === 'organization',
@@ -71,15 +76,20 @@ export const useSignalAccess = () => {
 
 /**
  * Check if a project has the Signal feature enabled.
- * Now checks org-level signal_enabled setting.
- * Kept for backward compatibility.
+ * Checks both org-level signal_enabled AND project-level features array.
  * 
  * @param {Object} project - Project object with features
- * @returns {boolean} - True if org has Signal enabled
+ * @returns {boolean} - True if project or org has Signal enabled
  */
 export const hasSignalFeature = (project) => {
   const currentOrg = useAuthStore.getState().currentOrg
-  return currentOrg?.signal_enabled || currentOrg?.signalEnabled || false
+  const orgSignalEnabled = currentOrg?.signal_enabled || currentOrg?.signalEnabled || false
+  
+  // Check project features array
+  const projectFeatures = project?.features || []
+  const projectSignalEnabled = Array.isArray(projectFeatures) && projectFeatures.includes('signal')
+  
+  return orgSignalEnabled || projectSignalEnabled
 }
 
 /**

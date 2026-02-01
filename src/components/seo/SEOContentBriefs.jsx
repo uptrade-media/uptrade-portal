@@ -1,7 +1,8 @@
 // src/components/seo/SEOContentBriefs.jsx
 // AI Content Briefs - generate comprehensive content briefs
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { useSeoContentBriefs, useGenerateContentBrief } from '@/hooks/seo'
 import { useSignalAccess } from '@/lib/signal-access'
 import SignalUpgradeCard from './signal/SignalUpgradeCard'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -37,38 +38,36 @@ export default function SEOContentBriefs({ projectId }) {
     )
   }
 
-  const { 
-    contentBriefs, 
-    currentBrief,
-    briefsLoading, 
-    fetchContentBriefs,
-    generateContentBrief
-  } = useSeoStore()
+  // React Query hooks
+  const { data: briefsData, isLoading: briefsLoading } = useSeoContentBriefs(projectId)
+  const generateBriefMutation = useGenerateContentBrief()
   
-  const [isGenerating, setIsGenerating] = useState(false)
+  // Extract data
+  const contentBriefs = briefsData?.briefs || briefsData || []
+  const currentBrief = briefsData?.currentBrief
+  
   const [targetKeyword, setTargetKeyword] = useState('')
   const [contentType, setContentType] = useState('blog')
   const [additionalContext, setAdditionalContext] = useState('')
   const [expandedBrief, setExpandedBrief] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
-
-  useEffect(() => {
-    if (projectId) {
-      fetchContentBriefs(projectId)
-    }
-  }, [projectId])
+  
+  // Use mutation loading state
+  const isGenerating = generateBriefMutation.isLoading
 
   const handleGenerate = async () => {
     if (!targetKeyword.trim()) return
-    setIsGenerating(true)
     try {
-      await generateContentBrief(projectId, targetKeyword.trim(), contentType, additionalContext)
+      await generateBriefMutation.mutateAsync({ 
+        projectId, 
+        keyword: targetKeyword.trim(),
+        // Additional context can be added to the data object
+      })
       setTargetKeyword('')
       setAdditionalContext('')
     } catch (error) {
       console.error('Generate brief error:', error)
     }
-    setIsGenerating(false)
   }
 
   const copyToClipboard = (text, id) => {
@@ -418,7 +417,7 @@ export default function SEOContentBriefs({ projectId }) {
             <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-lg font-semibold mb-2">No Content Briefs</h3>
             <p className="text-muted-foreground mb-4">
-              Generate AI-powered content briefs to guide your content creation
+              Generate Signal-powered content briefs to guide your content creation
             </p>
           </CardContent>
         </Card>

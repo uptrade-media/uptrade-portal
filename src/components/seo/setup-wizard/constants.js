@@ -1,11 +1,12 @@
 // src/components/seo/setup-wizard/constants.js
 // Configuration constants for the SEO Setup Wizard
 import { 
-  Globe, Brain, Search, FileText, Link2, Zap, CheckCircle2,
+  Globe, Search, FileText, Link2, Zap, CheckCircle2,
   BarChart3, Target, Lightbulb, AlertCircle, Code, MapPin, Users,
   TrendingDown, Layers, Award, Shield, Clock, Rocket, Activity,
   Database, PenLine, Gauge, Network, Microscope, Sparkles
 } from 'lucide-react'
+import SignalIcon from '@/components/ui/SignalIcon'
 
 // =============================================================================
 // PHASE DEFINITIONS - Major stages of setup
@@ -27,9 +28,9 @@ export const SETUP_PHASES = [
   },
   {
     id: 'intelligence',
-    title: 'AI Intelligence',
+    title: 'Signal Intelligence',
     description: 'Training & knowledge base',
-    icon: Brain,
+    icon: SignalIcon,
     color: 'from-purple-500 to-indigo-500'
   },
   {
@@ -62,9 +63,9 @@ export const SIMPLIFIED_PHASES = [
   },
   {
     id: 'analyze',
-    title: 'AI Analysis',
+    title: 'Signal Analysis',
     description: 'Deep content and SEO analysis',
-    icon: Brain,
+    icon: SignalIcon,
     steps: ['crawl-pages', 'internal-links', 'ai-train', 'ai-knowledge'],
     duration: '~2 minutes'
   },
@@ -152,13 +153,13 @@ export const SETUP_STEPS = [
     duration: 5000
   },
   
-  // PHASE 3: AI INTELLIGENCE
+  // PHASE 3: SIGNAL INTELLIGENCE
   {
     id: 'ai-train',
     phase: 'intelligence',
-    title: 'Training AI Brain',
-    description: 'Teaching the AI about your business and content',
-    icon: Brain,
+    title: 'Training Signal',
+    description: 'Teaching Signal about your business and content',
+    icon: SignalIcon,
     color: 'text-purple-500',
     bgColor: 'bg-purple-500/10',
     endpoint: 'seo-ai-train',
@@ -226,7 +227,7 @@ export const SETUP_STEPS = [
   {
     id: 'ai-recommendations',
     phase: 'optimization',
-    title: 'AI Recommendations',
+    title: 'Signal Recommendations',
     description: 'Generating prioritized action items',
     icon: Sparkles,
     color: 'text-cyan-500',
@@ -238,7 +239,7 @@ export const SETUP_STEPS = [
     id: 'complete',
     phase: 'optimization',
     title: 'Setup Complete!',
-    description: 'Your AI SEO Brain is fully configured',
+    description: 'Your Signal SEO is fully configured',
     icon: CheckCircle2,
     color: 'text-emerald-500',
     bgColor: 'bg-emerald-500/10',

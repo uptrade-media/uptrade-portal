@@ -39,7 +39,9 @@ import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import { useSignalStore } from '@/lib/signal-store'
+import { useSignalStore } from '@/lib/signal-store' // Keep for streaming UI state
+import { signalKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { echoApi } from '@/lib/signal-api'
 import { SignalAmbient, GlowCard } from '../shared/SignalUI'
 

@@ -50,7 +50,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { GlassCard, GlassAvatar, GlassEmptyState, StatusBadge } from './ui'
 import { toast } from '@/lib/toast'
-import useTeamStore from '@/lib/team-store'
+import { useTeamMembers, useCreateTeamMember, useUpdateTeamMember, useDeleteTeamMember, useResendInvite, useSetTeamMemberStatus, teamKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import useAuthStore from '@/lib/auth-store'
 
 // Role icons and colors
@@ -469,32 +470,27 @@ function EditTeamMemberDialog({ open, onOpenChange, member, onSubmit, isLoading 
 // Main TeamTab Component
 export default function TeamTab() {
   const { user } = useAuthStore()
-  const { 
-    teamMembers, 
-    summary, 
-    isLoading, 
-    fetchTeamMembers, 
-    createTeamMember, 
-    updateTeamMember,
-    resendInvite,
-    setTeamMemberStatus 
-  } = useTeamStore()
+  
+  // React Query hooks
+  const { data: teamData, isLoading } = useTeamMembers()
+  const createTeamMemberMutation = useCreateTeamMember()
+  const updateTeamMemberMutation = useUpdateTeamMember()
+  const resendInviteMutation = useResendInvite()
+  const setStatusMutation = useSetTeamMemberStatus()
+  
+  const teamMembers = teamData?.members || []
+  const summary = teamData?.summary || null
   
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Fetch team members on mount
-  useEffect(() => {
-    fetchTeamMembers()
-  }, [])
-
   // Handle add team member
   const handleAddMember = async (data) => {
     setIsSubmitting(true)
     try {
-      const result = await createTeamMember(data)
-      toast.success(result.message || 'Team member invited successfully')
+      await createTeamMemberMutation.mutateAsync(data)
+      toast.success('Team member invited successfully')
       setShowAddDialog(false)
     } catch (error) {
       toast.error(error.response?.data?.error || 'Failed to invite team member')
@@ -507,7 +503,7 @@ export default function TeamTab() {
   const handleEditMember = async (data) => {
     setIsSubmitting(true)
     try {
-      await updateTeamMember(data.id, data)
+      await updateTeamMemberMutation.mutateAsync({ id: data.id, updates: data })
       toast.success('Team member updated')
       setEditingMember(null)
     } catch (error) {
@@ -520,7 +516,7 @@ export default function TeamTab() {
   // Handle resend invite
   const handleResendInvite = async (member) => {
     try {
-      await resendInvite(member.id)
+      await resendInviteMutation.mutateAsync(member.id)
       toast.success(`Invite resent to ${member.email}`)
     } catch (error) {
       toast.error('Failed to resend invite')
@@ -530,7 +526,7 @@ export default function TeamTab() {
   // Handle status change
   const handleStatusChange = async (member, newStatus) => {
     try {
-      await setTeamMemberStatus(member.id, newStatus)
+      await setStatusMutation.mutateAsync({ id: member.id, status: newStatus })
       toast.success(`${member.name} ${newStatus === 'active' ? 'reactivated' : 'deactivated'}`)
     } catch (error) {
       toast.error(error.response?.data?.error || 'Failed to update status')

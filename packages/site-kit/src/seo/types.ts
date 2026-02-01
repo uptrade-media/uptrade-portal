@@ -16,7 +16,7 @@ export interface SEOPageData {
   path: string
   url?: string
   managed_title?: string
-  managed_description?: string
+  managed_meta_description?: string
   managed_og_title?: string
   managed_og_description?: string
   managed_og_image?: string
@@ -158,6 +158,24 @@ export interface ManagedContentProps {
   className?: string
   /** For 'react' type, map of component names to components */
   components?: Record<string, React.ComponentType<unknown>>
+  /** Inject entity annotations from knowledge graph (data-sonor-entity attributes) */
+  injectEntityAnnotations?: boolean
+}
+
+/**
+ * Entity from the knowledge graph (for content annotation)
+ */
+export interface SEOEntity {
+  id: string
+  project_id: string
+  entity_type: 'organization' | 'person' | 'service' | 'product' | 'location' | 'concept' | 'credential'
+  name: string
+  slug: string
+  properties: Record<string, unknown>
+  knows_about: string[]
+  same_as: string[]
+  schema_type?: string
+  is_primary: boolean
 }
 
 // ============================================

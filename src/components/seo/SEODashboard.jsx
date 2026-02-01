@@ -1,1025 +1,407 @@
 // src/components/seo/SEODashboard.jsx
-// SEO Command Center - Shows SEO data for the current tenant's domain
-// No "add site" - each org with SEO feature enabled automatically tracks their domain
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+// SEO Dashboard - Clean, focused answer to "Are my rankings improving?"
+// REWRITTEN: Jan 31, 2026
+import { useState, useCallback, useEffect, useMemo } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import { 
-  Globe, 
-  TrendingUp, 
-  TrendingDown,
-  AlertTriangle,
-  CheckCircle,
-  FileText,
-  Target,
-  RefreshCw,
-  ExternalLink,
-  Loader2,
-  Zap,
-  ArrowLeft,
-  Link2,
-  Settings,
-  Search,
-  MousePointerClick,
-  Eye,
-  BarChart3,
-  Shield,
-  Calendar,
-  Clock
+  Globe, TrendingUp, AlertTriangle, FileText, Target, RefreshCw,
+  ExternalLink, Settings, Search, MousePointerClick, Eye, BarChart3,
+  ChevronRight, Zap, ArrowUp, ArrowDown, Minus, Link2, Unlink, RotateCcw
 } from 'lucide-react'
-import SignalIcon from '@/components/ui/SignalIcon'
-import { useSeoStore } from '@/lib/seo-store'
+import { UptradeSpinner } from '@/components/UptradeLoading'
+import { 
+  useSeoProject, useSeoPages, useSeoOpportunities,
+  useSeoGSCOverview, useSeoGSCQueries, seoProjectKeys, seoGSCKeys
+} from '@/hooks/seo'
+import { seoApi, oauthApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import useAuthStore from '@/lib/auth-store'
+import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+import GscPropertySelector from './GscPropertySelector'
+import GscConnectModal from './GscConnectModal'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
-// Sub-views
-import SEOPagesList from './SEOPagesList'
-import SEOPageDetail from './SEOPageDetail'
-import SEOOpportunities from './SEOOpportunities'
-import SEOAIInsights from './SEOAIInsights'
-import SEOKeywordTracking from './SEOKeywordTracking'
-import SEOTechnicalAudit from './SEOTechnicalAudit'
-import SEOContentDecay from './SEOContentDecay'
-import SEOLocalSeo from './SEOLocalSeo'
-import SEOBacklinks from './SEOBacklinks'
-import SEOCompetitors from './SEOCompetitors'
+function MetricCard({ icon: Icon, label, value, change, loading = false, inverseChange = false, iconColor = 'text-primary' }) {
+  const isPositive = inverseChange ? change < 0 : change > 0
+  const isNegative = inverseChange ? change > 0 : change < 0
+  const showChange = change !== null && change !== undefined && !isNaN(change)
+  
+  return (
+    <Card className="relative overflow-hidden">
+      <CardContent className="pt-5 pb-4">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <div className={cn("p-2 rounded-lg", iconColor === 'text-primary' ? 'bg-primary/10' : 'bg-muted')}>
+                <Icon className={cn("h-4 w-4", iconColor)} />
+              </div>
+              <span className="text-sm font-medium text-muted-foreground">{label}</span>
+            </div>
+            {loading ? (
+              <Skeleton className="h-9 w-24" />
+            ) : (
+              <div className="flex items-baseline gap-3">
+                <span className="text-3xl font-bold text-foreground">{value}</span>
+                {showChange && (
+                  <div className={cn("flex items-center gap-1 text-sm font-medium",
+                    isPositive && "text-green-500", isNegative && "text-red-500",
+                    !isPositive && !isNegative && "text-muted-foreground"
+                  )}>
+                    {isPositive ? <ArrowUp className="h-3 w-3" /> : isNegative ? <ArrowDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
+                    {Math.abs(change).toFixed(1)}%
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
-// New dashboard components
-import SEOHealthScore from './SEOHealthScore'
-import SEOQuickWins from './SEOQuickWins'
-import SEONavigation from './SEONavigation'
-import SEOTrends from './SEOTrends'
-import SEOQuickActionsBar from './SEOQuickActionsBar'
-import { SEOCommandPalette } from './SEOCommandPalette'
+function TrendChart({ data = [], loading = false, height = 80 }) {
+  if (loading) return <Skeleton className="w-full" style={{ height }} />
+  if (!data.length) return <div className="flex items-center justify-center text-muted-foreground text-sm" style={{ height }}>No trend data</div>
+  const maxClicks = Math.max(...data.map(d => d.clicks || 0), 1)
+  return (
+    <div className="w-full" style={{ height }}>
+      <div className="h-full flex items-end gap-[2px]">
+        {data.map((day, i) => (
+          <div key={day.date || i} className="flex-1 bg-primary/60 hover:bg-primary rounded-t transition-colors"
+            style={{ height: `${Math.max(((day.clicks || 0) / maxClicks) * 100, 2)}%` }}
+            title={`${day.date}: ${day.clicks || 0} clicks`} />
+        ))}
+      </div>
+      <div className="flex justify-between mt-2 text-xs text-muted-foreground">
+        <span>{data[0]?.date || ''}</span><span>{data[data.length - 1]?.date || ''}</span>
+      </div>
+    </div>
+  )
+}
+
+function RankingDistribution({ queries = [], loading = false }) {
+  const distribution = useMemo(() => {
+    if (!queries?.length) return null
+    const buckets = {
+      top3: queries.filter(q => q.position <= 3).length,
+      top10: queries.filter(q => q.position > 3 && q.position <= 10).length,
+      top20: queries.filter(q => q.position > 10 && q.position <= 20).length,
+      beyond: queries.filter(q => q.position > 20).length,
+    }
+    return { ...buckets, total: Object.values(buckets).reduce((a, b) => a + b, 0) }
+  }, [queries])
+  
+  if (loading) return <Skeleton className="h-24 w-full" />
+  if (!distribution) return <div className="text-center py-6 text-muted-foreground text-sm">No keyword data</div>
+  
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1 h-8 rounded-lg overflow-hidden">
+        {distribution.top3 > 0 && <div className="bg-green-500 flex items-center justify-center text-white text-xs font-medium" style={{ flex: distribution.top3 }}>{distribution.top3 > 2 && distribution.top3}</div>}
+        {distribution.top10 > 0 && <div className="bg-blue-500 flex items-center justify-center text-white text-xs font-medium" style={{ flex: distribution.top10 }}>{distribution.top10 > 2 && distribution.top10}</div>}
+        {distribution.top20 > 0 && <div className="bg-amber-500 flex items-center justify-center text-white text-xs font-medium" style={{ flex: distribution.top20 }}>{distribution.top20 > 2 && distribution.top20}</div>}
+        {distribution.beyond > 0 && <div className="bg-muted flex items-center justify-center text-muted-foreground text-xs font-medium" style={{ flex: distribution.beyond }}>{distribution.beyond > 2 && distribution.beyond}</div>}
+      </div>
+      <div className="flex justify-between text-xs">
+        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500" /><span className="text-muted-foreground">Top 3: {distribution.top3}</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-500" /><span className="text-muted-foreground">4-10: {distribution.top10}</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-500" /><span className="text-muted-foreground">11-20: {distribution.top20}</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-muted" /><span className="text-muted-foreground">20+: {distribution.beyond}</span></div>
+      </div>
+    </div>
+  )
+}
+
+function TopKeywordsList({ queries = [], loading = false, onViewAll }) {
+  if (loading) return <div className="space-y-3">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+  if (!queries?.length) return <div className="text-center py-8 text-muted-foreground"><Search className="h-8 w-8 mx-auto mb-2 opacity-50" /><p className="text-sm">No keyword data</p></div>
+  
+  return (
+    <div className="space-y-2">
+      {queries.slice(0, 5).map((query, i) => (
+        <div key={query.query || i} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{query.query}</p>
+            <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+              <span>{query.clicks || 0} clicks</span><span>•</span><span>{((query.ctr || 0) * 100).toFixed(1)}% CTR</span>
+            </div>
+          </div>
+          <Badge variant="outline" className={cn("font-mono text-xs",
+            query.position <= 3 && "border-green-500/30 text-green-500 bg-green-500/10",
+            query.position > 3 && query.position <= 10 && "border-blue-500/30 text-blue-500 bg-blue-500/10",
+            query.position > 10 && query.position <= 20 && "border-amber-500/30 text-amber-500 bg-amber-500/10",
+            query.position > 20 && "border-muted text-muted-foreground"
+          )}>#{query.position?.toFixed(1) || '-'}</Badge>
+        </div>
+      ))}
+      {queries.length > 5 && onViewAll && <Button variant="ghost" size="sm" className="w-full mt-2" onClick={onViewAll}>View all {queries.length} keywords<ChevronRight className="h-4 w-4 ml-1" /></Button>}
+    </div>
+  )
+}
 
 export default function SEODashboard({ onNavigate }) {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { currentOrg, currentProject: authProject } = useAuthStore()
-  const { 
-    currentProject: seoProject,
-    pages,
-    opportunities,
-    aiRecommendations,
-    projectsLoading,
-    pagesLoading,
-    opportunitiesLoading,
-    projectsError,
-    fetchProjectForOrg,
-    fetchPages,
-    fetchOpportunities,
-    fetchAiRecommendations,
-    crawlSitemap,
-    detectOpportunities,
-    selectPage,
-    clearCurrentPage,
-    currentPage,
-    // GSC data
-    gscOverview,
-    gscQueries,
-    gscLoading,
-    gscError,
-    fetchGscOverview,
-    fetchGscQueries,
-    // CWV
-    cwvSummary,
-    fetchCwvSummary
-  } = useSeoStore()
-
-  // Use SEO project if available, otherwise fall back to auth project
-  const currentProject = seoProject || authProject
-
-  // Internal view state - now aligned with navigation
-  const [view, setView] = useState('overview') // overview, pages, keywords, content, technical, reports
-  const [subView, setSubView] = useState(null) // page-detail, etc.
-  const [crawling, setCrawling] = useState(false)
-  const [detecting, setDetecting] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const [lastScan, setLastScan] = useState(null)
-  
-  // Track if initial data has been fetched to prevent loops
-  const hasFetchedRef = useRef(false)
-  const lastProjectIdRef = useRef(null)
-  const lastSiteIdRef = useRef(null)
-
-  // Fetch site data for current project on mount (only once per project)
-  // Note: In the new architecture, projectId === projectId for SEO
-  useEffect(() => {
-    const projectId = authProject?.id
-    if (projectId && projectId !== lastProjectIdRef.current) {
-      lastProjectIdRef.current = projectId
-      // Only fetch if we don't already have data for this project
-      if (!seoProject?.id || seoProject.id !== projectId) {
-        fetchProjectForOrg(projectId)
-      }
-    }
-  }, [authProject?.id])
-
-  // Fetch pages, opportunities, and GSC data when site is loaded (only once per site)
-  useEffect(() => {
-    if (currentProject?.id && currentProject.id !== lastSiteIdRef.current) {
-      lastSiteIdRef.current = currentProject.id
-      hasFetchedRef.current = true
-      
-      fetchPages(currentProject.id, { limit: 50 })
-      fetchOpportunities(currentProject.id, { limit: 20, status: 'open' })
-      fetchAiRecommendations(currentProject.id)
-      fetchCwvSummary(currentProject.id)
-      setLastScan(currentProject.gsc_last_sync_at || currentProject.updated_at)
-      
-      // Also fetch GSC data using the site domain - pass projectId explicitly
-      const siteDomain = currentProject.domain || currentProject?.tenant_domain || currentOrg?.domain
-      if (siteDomain) {
-        fetchGscOverview(currentProject.id, siteDomain)
-        fetchGscQueries(currentProject.id, siteDomain, { limit: 20 })
-      }
-    }
-  }, [currentProject?.id])
-
-  const handleCrawlSitemap = async () => {
-    if (!currentProject?.id) return
-    setCrawling(true)
-    try {
-      await crawlSitemap(currentProject.id)
-      await fetchPages(currentProject.id, { limit: 50 })
-      setLastScan(new Date().toISOString())
-    } finally {
-      setCrawling(false)
-    }
-  }
-
-  const handleDetectOpportunities = async () => {
-    if (!currentProject?.id) return
-    setDetecting(true)
-    try {
-      await detectOpportunities(currentProject.id)
-      await fetchOpportunities(currentProject.id, { limit: 20, status: 'open' })
-    } finally {
-      setDetecting(false)
-    }
-  }
-
-  const handleSyncGsc = useCallback(async () => {
-    const siteDomain = currentProject?.domain || currentProject?.tenant_domain || currentOrg?.domain
-    if (!siteDomain) return
-    setSyncing(true)
-    try {
-      await fetchGscOverview(siteDomain)
-      await fetchGscQueries(siteDomain, { limit: 20 })
-      setLastScan(new Date().toISOString())
-    } finally {
-      setSyncing(false)
-    }
-  }, [currentProject?.domain, currentProject?.tenant_domain, currentOrg?.domain, fetchGscOverview, fetchGscQueries])
-
-  const handleSelectPage = async (pageId) => {
-    await selectPage(pageId)
-    setSubView('page-detail')
-  }
-
-  const handleViewChange = (newView) => {
-    setView(newView)
-    setSubView(null)
-    clearCurrentPage()
-  }
-
-  const handleBack = () => {
-    if (subView) {
-      setSubView(null)
-      clearCurrentPage()
-    } else {
-      setView('overview')
-    }
-  }
-
-  // Command palette action handler
-  const handleCommandAction = useCallback(async (action) => {
-    switch (action) {
-      case 'syncGsc':
-        handleSyncGsc()
-        break
-      case 'exportReport':
-        // TODO: Implement PDF export in Tier 3
-        console.log('Export report - coming soon')
-        break
-      case 'quickWins':
-        setView('content')
-        break
-      case 'aiAnalyze':
-        if (currentProject?.id) {
-          await fetchAiRecommendations(currentProject.id)
-          setView('content')
-        }
-        break
-      case 'priorityQueue':
-        setView('opportunities')
-        break
-    }
-  }, [currentProject?.id, fetchAiRecommendations, handleSyncGsc])
-
-  const handleFixIssues = (issues) => {
-    // Navigate to AI insights with issues pre-selected
-    setView('content')
-  }
-
-  const formatNumber = (num) => {
-    if (num === null || num === undefined) return '-'
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
-    return num.toString()
-  }
-
-  const formatPercent = (num) => {
-    if (num === null || num === undefined) return '-'
-    return `${num.toFixed(1)}%`
-  }
-
-  const formatRelativeTime = (dateStr) => {
-    if (!dateStr) return 'Never'
-    const date = new Date(dateStr)
-    const now = new Date()
-    const diffMs = now - date
-    const diffMins = Math.floor(diffMs / 60000)
-    const diffHours = Math.floor(diffMs / 3600000)
-    const diffDays = Math.floor(diffMs / 86400000)
-    
-    if (diffMins < 1) return 'Just now'
-    if (diffMins < 60) return `${diffMins}m ago`
-    if (diffHours < 24) return `${diffHours}h ago`
-    if (diffDays < 7) return `${diffDays}d ago`
-    return date.toLocaleDateString()
-  }
-
-  const getChangeIndicator = (current, previous, inverse = false) => {
-    if (!previous || current === previous) return null
-    const isPositive = inverse ? current < previous : current > previous
-    const change = Math.abs(((current - previous) / previous) * 100).toFixed(1)
-    
-    return (
-      <span className={`flex items-center gap-1 text-xs ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-        {isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-        {change}%
-      </span>
-    )
-  }
-
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 'critical': return 'bg-red-500/20 text-red-400 border-red-500/30'
-      case 'high': return 'bg-orange-500/20 text-orange-400 border-orange-500/30'
-      case 'medium': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-      default: return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-    }
-  }
-
-  const getHealthBadge = (score) => {
-    if (score === null || score === undefined) return null
-    if (score >= 80) return <Badge className="bg-green-500/20 text-green-400">{score}</Badge>
-    if (score >= 60) return <Badge className="bg-yellow-500/20 text-yellow-400">{score}</Badge>
-    return <Badge className="bg-red-500/20 text-red-400">{score}</Badge>
-  }
-
-  // Prepare derived data that's used across multiple views (must be before any returns)
-  const opportunityCounts = {
-    technical: opportunities.filter(o => o.type === 'technical').length,
-    content: opportunities.filter(o => o.type === 'content').length
-  }
-  const gscMetrics = gscOverview?.metrics || {}
-  const gscTrend = gscOverview?.trend || []
-  const hasGscData = gscOverview && !gscError
-
-  // Loading state
-  if (projectsLoading) {
-    return (
-      <div className="p-6 flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading SEO data...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // No project selected
-  if (!currentProject?.id) {
-    return (
-      <div className="p-6">
-        <Card className="border-blue-500/30 bg-blue-500/5">
-          <CardContent className="py-12 text-center">
-            <Search className="h-12 w-12 mx-auto mb-4 text-blue-400" />
-            <h3 className="text-lg font-semibold mb-2 text-foreground">
-              Select a Project
-            </h3>
-            <p className="text-muted-foreground mb-4 max-w-md mx-auto">
-              Select a project from the sidebar to view SEO data and analytics.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  // Get domain from project or org
+  const currentProject = authProject
+  const projectId = currentProject?.id
   const domain = currentProject?.domain || currentOrg?.domain
 
-  // Error or no domain configured
-  if (!domain) {
-    return (
-      <div className="p-6">
-        <Card className="border-yellow-500/30 bg-yellow-500/5">
-          <CardContent className="py-12 text-center">
-            <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-yellow-400" />
-            <h3 className="text-lg font-semibold mb-2 text-foreground">
-              No Domain Configured
-            </h3>
-            <p className="text-muted-foreground mb-4 max-w-md mx-auto">
-              To use the SEO module, configure a domain for {currentOrg?.name || 'this organization'} in the organization settings.
-            </p>
-            <Button variant="outline" onClick={() => onNavigate?.('settings')}>
-              <Settings className="h-4 w-4 mr-2" />
-              Configure Domain
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  const { data: seoProjectData, isLoading: projectLoading } = useSeoProject(projectId)
+  const { data: pagesData, isLoading: pagesLoading } = useSeoPages(projectId, { limit: 100 })
+  const { data: opportunitiesData } = useSeoOpportunities(projectId, { status: 'open' })
+  const { data: gscOverviewData, isLoading: gscLoading } = useSeoGSCOverview(projectId)
+  const { data: gscQueriesData, isLoading: queriesLoading } = useSeoGSCQueries(projectId, { limit: 100 })
 
-  // No site created yet - offer to initialize
-  if (!currentProject && !projectsLoading) {
-    return (
-      <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">SEO Command Center</h1>
-          <p className="text-muted-foreground">
-            Track and optimize SEO for {domain}
-          </p>
-        </div>
-        
-        <Card className="border-dashed">
-          <CardContent className="py-12 text-center">
-            <Globe className="h-12 w-12 mx-auto mb-4 text-primary" />
-            <h3 className="text-lg font-semibold mb-2 text-foreground">
-              Initialize SEO Tracking
-            </h3>
-            <p className="text-muted-foreground mb-4 max-w-md mx-auto">
-              Start tracking SEO performance for <strong>{domain}</strong>. 
-              We'll crawl your sitemap and analyze your pages.
-            </p>
-            <Button onClick={() => currentProject?.id && fetchProjectForOrg(currentProject.id, true)}>
-              <Zap className="h-4 w-4 mr-2" />
-              Initialize SEO Tracking
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  const pages = useMemo(() => { const p = pagesData?.pages ?? pagesData?.data; return Array.isArray(p) ? p : (p?.pages ?? []) }, [pagesData])
+  const opportunities = useMemo(() => { const o = opportunitiesData?.opportunities ?? opportunitiesData?.data ?? opportunitiesData; return Array.isArray(o) ? o : [] }, [opportunitiesData])
+  
+  const gscOverview = gscOverviewData
+  const gscConnected = gscOverview?.connected === true
+  const gscConnectionId = gscOverview?.connectionId
+  const gscPropertyUrl = gscOverview?.propertyUrl
+  const gscAccountName = gscOverview?.accountName
+  const gscMetrics = gscOverview?.metrics || {}
+  const gscTrend = gscOverview?.trend || []
+  const gscQueries = gscQueriesData?.queries || gscQueriesData || []
 
-  // Render sub-views (detail views)
-  if (subView === 'page-detail' && currentPage) {
-    return (
-      <div className="p-6">
-        <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4 -ml-2">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Pages
-        </Button>
-        <SEOPageDetail page={currentPage} site={currentProject} />
-      </div>
-    )
-  }
+  const [syncing, setSyncing] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [showDisconnectDialog, setShowDisconnectDialog] = useState(false)
+  const [showGscConnectModal, setShowGscConnectModal] = useState(false)
+  const [gscPropertyConnectionId, setGscPropertyConnectionId] = useState(null)
 
-  // Render tab views
-  if (view === 'pages') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOPagesList site={currentProject} onSelectPage={handleSelectPage} />
-      </div>
-    )
-  }
+  // Handle OAuth callback when returning from full-page redirect (legacy) or from URL params
+  useEffect(() => {
+    if (!projectId) return
+    const params = new URLSearchParams(window.location.search)
+    const selectProperty = params.get('selectProperty')
+    const connId = params.get('connectionId')
+    const connected = params.get('connected')
+    if (connId && connected === 'google') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('connectionId')
+      url.searchParams.delete('connected')
+      url.searchParams.delete('selectProperty')
+      url.searchParams.delete('gscSiteCount')
+      url.searchParams.delete('modules')
+      window.history.replaceState({}, '', url.toString())
+      if (selectProperty === 'true') setGscPropertyConnectionId(connId)
+      else {
+        queryClient.invalidateQueries({ queryKey: seoProjectKeys.detail(projectId) })
+        queryClient.invalidateQueries({ queryKey: seoGSCKeys.overview(projectId) })
+      }
+    }
+  }, [projectId, queryClient])
 
-  if (view === 'keywords') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOKeywordTracking projectId={currentProject?.id} gscQueries={gscQueries} />
-      </div>
-    )
-  }
+  const handleGscPropertySelected = useCallback(() => {
+    setGscPropertyConnectionId(null)
+    queryClient.invalidateQueries({ queryKey: seoProjectKeys.detail(projectId) })
+    queryClient.invalidateQueries({ queryKey: seoGSCKeys.overview(projectId) })
+    queryClient.invalidateQueries({ queryKey: seoGSCKeys.queries(projectId) })
+  }, [projectId, queryClient])
 
-  if (view === 'content') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOContentDecay projectId={currentProject?.id} />
-      </div>
-    )
-  }
+  const handleSyncGsc = useCallback(async () => {
+    if (!projectId) return
+    setSyncing(true)
+    try { await seoApi.syncGsc(projectId); queryClient.invalidateQueries({ queryKey: ['seo', 'gsc'] }) }
+    finally { setSyncing(false) }
+  }, [projectId, queryClient])
 
-  if (view === 'health-report') {
-    return (
-      <div className="p-6 space-y-6">
-        <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4 -ml-2">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Dashboard
-        </Button>
-        <SEOHealthScore 
-          site={currentProject}
-          pages={pages}
-          opportunities={opportunities}
-          gscMetrics={gscMetrics}
-          cwvSummary={cwvSummary}
-          detailed={true}
-          onFixIssues={handleFixIssues}
-        />
-      </div>
-    )
-  }
+  const handleConnectGsc = useCallback(() => {
+    if (!projectId) return
+    setShowGscConnectModal(true)
+  }, [projectId])
 
-  if (view === 'technical') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOTechnicalAudit 
-          projectId={currentProject?.id} 
-          pages={pages}
-          cwvSummary={cwvSummary}
-        />
-      </div>
-    )
-  }
+  const handleGscConnectSuccess = useCallback(({ connectionId, selectProperty }) => {
+    queryClient.invalidateQueries({ queryKey: seoProjectKeys.detail(projectId) })
+    queryClient.invalidateQueries({ queryKey: seoGSCKeys.overview(projectId) })
+    queryClient.invalidateQueries({ queryKey: seoGSCKeys.queries(projectId) })
+    if (selectProperty) setGscPropertyConnectionId(connectionId)
+  }, [projectId, queryClient])
 
-  if (view === 'local') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOLocalSeo projectId={currentProject?.id} />
-      </div>
-    )
-  }
+  const handleDisconnectGsc = useCallback(async () => {
+    if (!projectId) return
+    setDisconnecting(true)
+    try {
+      await seoApi.disconnectGsc(projectId)
+      toast.success('Google Search Console disconnected')
+      queryClient.invalidateQueries({ queryKey: seoProjectKeys.detail(projectId) })
+      queryClient.invalidateQueries({ queryKey: seoGSCKeys.overview(projectId) })
+      queryClient.invalidateQueries({ queryKey: seoGSCKeys.queries(projectId) })
+    } catch (err) {
+      console.error('Disconnect GSC failed:', err)
+      toast.error('Failed to disconnect')
+    } finally {
+      setDisconnecting(false)
+      setShowDisconnectDialog(false)
+    }
+  }, [projectId, queryClient])
 
-  if (view === 'backlinks') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOBacklinks projectId={currentProject?.id} />
-      </div>
-    )
-  }
+  const handleChangeProperty = useCallback(() => {
+    if (gscConnectionId) {
+      setGscPropertyConnectionId(gscConnectionId)
+    }
+  }, [gscConnectionId])
 
-  if (view === 'competitors') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOCompetitors site={currentProject} />
-      </div>
-    )
-  }
+  const handleNavigate = useCallback((path) => { onNavigate ? onNavigate(path) : navigate(path) }, [navigate, onNavigate])
+  const formatNumber = (num) => { if (num === null || num === undefined) return '-'; if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`; if (num >= 1000) return `${(num / 1000).toFixed(1)}K`; return num.toString() }
 
-  if (view === 'reports') {
-    return (
-      <div className="p-6 space-y-6">
-        <SEONavigation activeView={view} onViewChange={handleViewChange} alerts={opportunityCounts.technical} opportunities={opportunityCounts.content} />
-        <SEOTrends site={currentProject} onViewDetails={handleViewChange} />
-      </div>
-    )
-  }
+  if (projectLoading) return <div className="p-6 flex items-center justify-center min-h-[400px]"><UptradeSpinner size="md" label="Loading SEO data..." /></div>
+  if (!projectId) return <div className="p-6"><Card className="border-blue-500/30 bg-blue-500/5"><CardContent className="py-12 text-center"><Search className="h-12 w-12 mx-auto mb-4 text-blue-400" /><h3 className="text-lg font-semibold mb-2">Select a Project</h3><p className="text-muted-foreground">Select a project from the sidebar</p></CardContent></Card></div>
+  if (!domain) return <div className="p-6"><Card className="border-yellow-500/30 bg-yellow-500/5"><CardContent className="py-12 text-center"><AlertTriangle className="h-12 w-12 mx-auto mb-4 text-yellow-400" /><h3 className="text-lg font-semibold mb-2">No Domain Configured</h3><p className="text-muted-foreground mb-4">Configure a domain in project settings</p><Button variant="outline" onClick={() => handleNavigate('/settings')}><Settings className="h-4 w-4 mr-2" />Configure Domain</Button></CardContent></Card></div>
 
-  // Legacy views for backwards compatibility
-  if (view === 'opportunities') {
-    return (
-      <div className="p-6">
-        <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4 -ml-2">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Overview
-        </Button>
-        <SEOOpportunities site={currentProject} onSelectPage={handleSelectPage} />
-      </div>
-    )
-  }
-
-  if (view === 'opportunities') {
-    return (
-      <div className="p-6">
-        <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4 -ml-2">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Overview
-        </Button>
-        <SEOOpportunities site={currentProject} onSelectPage={handleSelectPage} />
-      </div>
-    )
-  }
-
-  if (view === 'ai-insights') {
-    return (
-      <div className="p-6">
-        <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4 -ml-2">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Overview
-        </Button>
-        <SEOAIInsights site={currentProject} onSelectPage={handleSelectPage} />
-      </div>
-    )
-  }
-
-  // Main overview
-  const topPages = pages.slice(0, 5)
-  const openOpportunities = opportunities.filter(o => o.status === 'open').slice(0, 5)
+  const openOpportunities = opportunities.filter(o => o.status === 'open')
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header with Status */}
+    <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">SEO Command Center</h1>
+          <h1 className="text-2xl font-bold text-foreground">SEO Dashboard</h1>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
-            <a 
-              href={`https://${domain}`} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-muted-foreground hover:text-primary flex items-center gap-1"
-            >
-              <Globe className="h-4 w-4 text-primary" />
-              {domain}
-              <ExternalLink className="h-3 w-3" />
+            <a href={`https://${domain}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary flex items-center gap-1 text-sm">
+              <Globe className="h-4 w-4 text-primary" />{domain}<ExternalLink className="h-3 w-3" />
             </a>
-            
-            {/* GSC Sync Status Indicator */}
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted/30 border border-border/50">
-              <div className={`w-2 h-2 rounded-full ${syncing ? 'bg-yellow-400 animate-pulse' : hasGscData ? 'bg-green-400' : 'bg-gray-400'}`} />
+              <div className={cn("w-2 h-2 rounded-full", syncing ? 'bg-yellow-400 animate-pulse' : gscConnected ? 'bg-green-400' : 'bg-gray-400')} />
               <span className="text-xs text-muted-foreground">
-                {syncing ? 'Syncing...' : hasGscData ? 'GSC Connected' : 'GSC Not Connected'}
+                {syncing ? 'Syncing...' : gscConnected ? (
+                  gscPropertyUrl ? `GSC: ${gscPropertyUrl.replace(/^(https?:\/\/|sc-domain:)/, '')}` : 'GSC Connected'
+                ) : 'GSC Not Connected'}
               </span>
-              {currentProject?.gsc_last_sync_at && !syncing && (
-                <span className="text-xs text-muted-foreground border-l border-border/50 pl-2 ml-1">
-                  {formatRelativeTime(currentProject.gsc_last_sync_at)}
-                </span>
-              )}
-              <Button 
-                variant="ghost" 
-                size="sm"
-                className="h-5 w-5 p-0 ml-1"
-                onClick={handleSyncGsc}
-                disabled={syncing}
-              >
-                <RefreshCw className={`h-3 w-3 ${syncing ? 'animate-spin' : ''}`} />
-              </Button>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={async () => {
-              setCrawling(true)
-              setSyncing(true)
-              setDetecting(true)
-              try {
-                await Promise.all([
-                  handleCrawlSitemap(),
-                  handleSyncGsc(),
-                  handleDetectOpportunities()
-                ])
-              } finally {
-                setCrawling(false)
-                setSyncing(false)
-                setDetecting(false)
-              }
-            }}
-            disabled={crawling || syncing || detecting}
-          >
-            {(crawling || syncing || detecting) ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Scan Now
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => setView('ai-insights')}
-            className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
-          >
-            <SignalIcon className="h-4 w-4 mr-2" />
-            Signal Insights
-          </Button>
+        <Button variant="outline" size="sm" onClick={handleSyncGsc} disabled={syncing || !gscConnected}>
+          <RefreshCw className={cn("h-4 w-4 mr-2", syncing && "animate-spin")} />{syncing ? 'Syncing...' : 'Sync Now'}
+        </Button>
+      </div>
+
+      {!gscConnected && !gscLoading && (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-amber-500/10"><Link2 className="h-5 w-5 text-amber-500" /></div>
+                <div><p className="font-medium text-foreground">Connect Google Search Console</p><p className="text-sm text-muted-foreground">Get real ranking data, click trends, and keyword insights</p></div>
+              </div>
+              <Button onClick={handleConnectGsc} size="sm">Connect GSC</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard icon={MousePointerClick} label="Clicks (28d)" value={formatNumber(gscMetrics.clicks?.value || currentProject?.total_clicks_28d || 0)} change={gscMetrics.clicks?.change} loading={gscLoading} iconColor="text-blue-500" />
+        <MetricCard icon={Eye} label="Impressions (28d)" value={formatNumber(gscMetrics.impressions?.value || currentProject?.total_impressions_28d || 0)} change={gscMetrics.impressions?.change} loading={gscLoading} iconColor="text-purple-500" />
+        <MetricCard icon={BarChart3} label="Avg Position" value={(gscMetrics.position?.value || currentProject?.avg_position_28d)?.toFixed(1) || '-'} change={gscMetrics.position?.change} loading={gscLoading} inverseChange iconColor="text-orange-500" />
+        <MetricCard icon={Target} label="CTR" value={`${((gscMetrics.ctr?.value || currentProject?.avg_ctr_28d || 0) * 100).toFixed(1)}%`} change={gscMetrics.ctr?.change} loading={gscLoading} iconColor="text-green-500" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <Card><CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" />Click Trend (28 Days)</CardTitle></CardHeader><CardContent><TrendChart data={gscTrend} loading={gscLoading} height={100} /></CardContent></Card>
+          <Card><CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-base flex items-center gap-2"><BarChart3 className="h-4 w-4 text-primary" />Ranking Distribution</CardTitle><Badge variant="outline" className="text-xs">{gscQueries?.length || 0} keywords</Badge></div></CardHeader><CardContent><RankingDistribution queries={gscQueries} loading={queriesLoading} /></CardContent></Card>
+          <Card><CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-base flex items-center gap-2"><Search className="h-4 w-4 text-primary" />Top Keywords</CardTitle><Button variant="ghost" size="sm" onClick={() => handleNavigate('/seo/keywords')}>View All</Button></div></CardHeader><CardContent><TopKeywordsList queries={gscQueries} loading={queriesLoading} onViewAll={() => handleNavigate('/seo/keywords')} /></CardContent></Card>
+        </div>
+        <div className="space-y-6">
+          <Card><CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Zap className="h-4 w-4 text-amber-500" />Quick Actions</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              {!gscConnected ? (
+                <Button variant="outline" className="w-full justify-start border-amber-500/30 hover:bg-amber-500/10" onClick={handleConnectGsc}>
+                  <Link2 className="h-4 w-4 mr-2 text-amber-500" />Connect GSC<Badge variant="secondary" className="ml-auto text-xs">Required</Badge>
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" className="w-full justify-start" onClick={handleSyncGsc} disabled={syncing}>
+                    <RefreshCw className={cn("h-4 w-4 mr-2", syncing && "animate-spin")} />{syncing ? 'Syncing...' : 'Sync GSC Data'}
+                  </Button>
+                  {gscConnectionId && (
+                    <Button variant="outline" className="w-full justify-start" onClick={handleChangeProperty}>
+                      <RotateCcw className="h-4 w-4 mr-2" />Change Property
+                    </Button>
+                  )}
+                  <Button variant="outline" className="w-full justify-start text-red-500 hover:text-red-600 hover:bg-red-500/10 border-red-500/30" onClick={() => setShowDisconnectDialog(true)}>
+                    <Unlink className="h-4 w-4 mr-2" />Disconnect GSC
+                  </Button>
+                </>
+              )}
+              <Button variant="outline" className="w-full justify-start" onClick={() => handleNavigate('/seo/pages')}><FileText className="h-4 w-4 mr-2" />View All Pages<Badge variant="secondary" className="ml-auto text-xs">{pages.length}</Badge></Button>
+              {openOpportunities.length > 0 && <Button variant="outline" className="w-full justify-start border-primary/30 hover:bg-primary/10" onClick={() => handleNavigate('/seo/pages')}><Target className="h-4 w-4 mr-2 text-primary" />Review Opportunities<Badge className="ml-auto bg-primary/20 text-primary text-xs">{openOpportunities.length}</Badge></Button>}
+            </CardContent>
+          </Card>
+          <Card><CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><FileText className="h-4 w-4" />Pages</CardTitle></CardHeader>
+            <CardContent>
+              {pagesLoading ? <Skeleton className="h-16 w-full" /> : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Total Pages</span><span className="text-lg font-semibold">{pages.length}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Indexed</span><span className="text-sm font-medium text-green-500">{currentProject?.pages_indexed || pages.filter(p => p.index_status === 'indexed' || p.indexing_verdict === 'PASS' || p.is_indexed).length}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-sm text-muted-foreground">Not Indexed</span><span className="text-sm font-medium text-red-500">{currentProject?.pages_not_indexed || pages.filter(p => !(p.index_status === 'indexed' || p.indexing_verdict === 'PASS' || p.is_indexed)).length}</span></div>
+                  <Button variant="ghost" size="sm" className="w-full mt-2" onClick={() => handleNavigate('/seo/pages')}>View All Pages<ChevronRight className="h-4 w-4 ml-1" /></Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          {openOpportunities.length > 0 && (
+            <Card className="border-primary/20"><CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Zap className="h-4 w-4 text-primary" />Opportunities</CardTitle></CardHeader>
+              <CardContent><div className="space-y-2">
+                {openOpportunities.slice(0, 3).map((opp) => <div key={opp.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 text-sm"><span className="truncate flex-1">{opp.title}</span><Badge variant="outline" className={cn("ml-2 text-xs", opp.priority === 'critical' && "border-red-500/30 text-red-500", opp.priority === 'high' && "border-orange-500/30 text-orange-500", opp.priority === 'medium' && "border-yellow-500/30 text-yellow-500")}>{opp.priority}</Badge></div>)}
+                {openOpportunities.length > 3 && <Button variant="ghost" size="sm" className="w-full" onClick={() => handleNavigate('/seo/pages')}>+{openOpportunities.length - 3} more<ChevronRight className="h-4 w-4 ml-1" /></Button>}
+              </div></CardContent>
+            </Card>
+          )}
         </div>
       </div>
 
-      {/* GSC Error Banner */}
-      {gscError && (
-        <Card className="border-yellow-500/30 bg-yellow-500/5">
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-yellow-400" />
-              <div>
-                <p className="text-sm font-medium text-yellow-400">Google Search Console Error</p>
-                <p className="text-xs text-muted-foreground">
-                  {typeof gscError === 'string' ? gscError : gscError?.message || 'Unknown error'}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Quick Actions Bar */}
-      <SEOQuickActionsBar 
-        projectId={currentProject?.id}
-        domain={domain}
-        onActionComplete={(action, msg) => console.log('[SEO] Action complete:', action, msg)}
+      {/* GSC Connect Modal (popup OAuth, no full-page redirect) */}
+      <GscConnectModal
+        open={showGscConnectModal}
+        onOpenChange={setShowGscConnectModal}
+        projectId={projectId}
+        onSuccess={handleGscConnectSuccess}
       />
 
-      {/* Health Score - Full Width */}
-      <SEOHealthScore 
-        site={currentProject}
-        pages={pages}
-        opportunities={opportunities}
-        gscMetrics={gscMetrics}
-        cwvSummary={cwvSummary}
-        onViewDetails={() => handleViewChange('health-report')}
-        onFixIssues={handleFixIssues}
-      />
-      
-      {/* Quick Wins */}
-      <SEOQuickWins 
-        site={currentProject}
-        onViewAll={() => setView('ai-insights')}
-      />
+      {/* GSC Property Selector Dialog */}
+      <GscPropertySelector isOpen={!!gscPropertyConnectionId} onClose={() => setGscPropertyConnectionId(null)} connectionId={gscPropertyConnectionId} onPropertySelected={handleGscPropertySelected} />
 
-      {/* Quick Stats from GSC */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className={gscLoading ? 'animate-pulse' : ''}>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <MousePointerClick className="h-4 w-4 text-blue-400" />
-              <span className="text-sm text-muted-foreground">Clicks (28d)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold text-foreground">
-                {formatNumber(hasGscData ? gscMetrics.clicks?.value : currentProject?.total_clicks_28d)}
-              </span>
-              {hasGscData && gscMetrics.clicks?.change !== undefined && (
-                <span className={`flex items-center gap-1 text-xs ${gscMetrics.clicks.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {gscMetrics.clicks.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  {Math.abs(gscMetrics.clicks.change).toFixed(1)}%
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card className={gscLoading ? 'animate-pulse' : ''}>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Eye className="h-4 w-4 text-purple-400" />
-              <span className="text-sm text-muted-foreground">Impressions (28d)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold text-foreground">
-                {formatNumber(hasGscData ? gscMetrics.impressions?.value : currentProject?.total_impressions_28d)}
-              </span>
-              {hasGscData && gscMetrics.impressions?.change !== undefined && (
-                <span className={`flex items-center gap-1 text-xs ${gscMetrics.impressions.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {gscMetrics.impressions.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  {Math.abs(gscMetrics.impressions.change).toFixed(1)}%
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card className={gscLoading ? 'animate-pulse' : ''}>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <BarChart3 className="h-4 w-4 text-orange-400" />
-              <span className="text-sm text-muted-foreground">Avg Position</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold text-foreground">
-                {hasGscData ? gscMetrics.position?.value?.toFixed(1) : (currentProject?.avg_position_28d?.toFixed(1) || '-')}
-              </span>
-              {hasGscData && gscMetrics.position?.change !== undefined && (
-                <span className={`flex items-center gap-1 text-xs ${gscMetrics.position.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {gscMetrics.position.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  {Math.abs(gscMetrics.position.change).toFixed(1)}%
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card className={gscLoading ? 'animate-pulse' : ''}>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Target className="h-4 w-4 text-green-400" />
-              <span className="text-sm text-muted-foreground">CTR</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold text-foreground">
-                {hasGscData ? `${(gscMetrics.ctr?.value * 100)?.toFixed(1)}%` : formatPercent(currentProject?.avg_ctr_28d)}
-              </span>
-              {hasGscData && gscMetrics.ctr?.change !== undefined && (
-                <span className={`flex items-center gap-1 text-xs ${gscMetrics.ctr.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {gscMetrics.ctr.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  {Math.abs(gscMetrics.ctr.change).toFixed(1)}%
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Click Trend Sparkline */}
-      {hasGscData && gscTrend.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Click Trend (Last 28 Days)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-16 flex items-end gap-[2px]">
-              {gscTrend.map((day, i) => {
-                const maxClicks = Math.max(...gscTrend.map(d => d.clicks))
-                const height = maxClicks > 0 ? (day.clicks / maxClicks) * 100 : 0
-                return (
-                  <div 
-                    key={day.date}
-                    className="flex-1 bg-primary rounded-t opacity-60 hover:opacity-100 transition-opacity"
-                    style={{ height: `${Math.max(height, 2)}%` }}
-                    title={`${day.date}: ${day.clicks} clicks`}
-                  />
-                )
-              })}
-            </div>
-            <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-              <span>{gscTrend[0]?.date}</span>
-              <span>{gscTrend[gscTrend.length - 1]?.date}</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Top Queries from GSC */}
-      {hasGscData && gscQueries.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Search className="h-4 w-4" />
-                Top Search Queries
-              </CardTitle>
-              <Badge variant="outline" className="text-xs">
-                From Google Search Console
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-muted-foreground border-b border-border/50">
-                    <th className="pb-2 font-medium">Query</th>
-                    <th className="pb-2 font-medium text-right">Clicks</th>
-                    <th className="pb-2 font-medium text-right">Impressions</th>
-                    <th className="pb-2 font-medium text-right">Position</th>
-                    <th className="pb-2 font-medium text-right">CTR</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {gscQueries.slice(0, 10).map((query, i) => (
-                    <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
-                      <td className="py-2 text-foreground">{query.query}</td>
-                      <td className="py-2 text-right text-muted-foreground">{query.clicks}</td>
-                      <td className="py-2 text-right text-muted-foreground">{formatNumber(query.impressions)}</td>
-                      <td className="py-2 text-right">
-                        <span className={query.position <= 10 ? 'text-green-400' : query.position <= 20 ? 'text-yellow-400' : 'text-muted-foreground'}>
-                          {query.position?.toFixed(1)}
-                        </span>
-                      </td>
-                      <td className="py-2 text-right text-muted-foreground">
-                        {(query.ctr * 100).toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Status Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Pages Tracked
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-foreground">
-              {pages.length || 0}
-            </div>
-            <div className="flex items-center gap-2 mt-2 text-sm">
-              <span className="text-green-400">{currentProject?.pages_indexed || 0} indexed</span>
-              <span className="text-muted-foreground">•</span>
-              <span className="text-red-400">{currentProject?.pages_not_indexed || 0} not indexed</span>
-            </div>
-            <Button 
-              variant="link" 
-              size="sm" 
-              className="px-0 mt-2"
-              onClick={() => setView('pages')}
+      {/* Disconnect Confirmation Dialog */}
+      <AlertDialog open={showDisconnectDialog} onOpenChange={setShowDisconnectDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect Google Search Console?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the connection to {gscAccountName ? `"${gscAccountName}"` : 'Google Search Console'}.
+              Your historical data will be preserved, but live syncing will stop.
+              You can reconnect anytime.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={disconnecting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDisconnectGsc}
+              disabled={disconnecting}
+              className="bg-red-500 hover:bg-red-600"
             >
-              View All Pages →
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Target className="h-4 w-4" />
-              Open Opportunities
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-foreground">
-              {openOpportunities.length}
-            </div>
-            <div className="flex items-center gap-2 mt-2 text-sm">
-              <span className="text-red-400">
-                {opportunities.filter(o => o.priority === 'critical').length} critical
-              </span>
-              <span className="text-muted-foreground">•</span>
-              <span className="text-orange-400">
-                {opportunities.filter(o => o.priority === 'high').length} high
-              </span>
-            </div>
-            <Button 
-              variant="link" 
-              size="sm" 
-              className="px-0 mt-2"
-              onClick={() => setView('opportunities')}
-            >
-              View All Opportunities →
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Link2 className="h-4 w-4" />
-              Google Search Console
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(currentProject?.gscConnected || currentProject?.gsc_connected_at) ? (
-              <>
-                <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Connected
-                </Badge>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Last sync: {(currentProject.lastSyncAt || currentProject.gsc_last_sync_at)
-                    ? new Date(currentProject.lastSyncAt || currentProject.gsc_last_sync_at).toLocaleDateString()
-                    : 'Never'}
-                </p>
-              </>
-            ) : (
-              <>
-                <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
-                  <AlertTriangle className="h-3 w-3 mr-1" />
-                  Not Connected
-                </Badge>
-                <Button variant="link" size="sm" className="px-0 mt-2">
-                  Connect GSC →
-                </Button>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Top Pages & Recent Opportunities */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top Pages */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Top Pages</CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setView('pages')}>
-                View All
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {pagesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : topPages.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>No pages crawled yet</p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="mt-2"
-                  onClick={handleCrawlSitemap}
-                  disabled={crawling}
-                >
-                  {crawling ? 'Crawling...' : 'Crawl Sitemap'}
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {topPages.map((page) => (
-                  <div 
-                    key={page.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
-                    onClick={() => handleSelectPage(page.id)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {page.title || page.path}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {page.path}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="text-right">
-                        <p className="text-foreground">{page.clicks_28d || 0}</p>
-                        <p className="text-xs text-muted-foreground">clicks</p>
-                      </div>
-                      {getHealthBadge(page.seo_health_score)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Opportunities */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Recent Opportunities</CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setView('opportunities')}>
-                View All
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {opportunitiesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : openOpportunities.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Zap className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>No opportunities detected</p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="mt-2"
-                  onClick={handleDetectOpportunities}
-                  disabled={detecting}
-                >
-                  {detecting ? 'Detecting...' : 'Detect Opportunities'}
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {openOpportunities.map((opp) => (
-                  <div 
-                    key={opp.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
-                    onClick={() => opp.page_id && handleSelectPage(opp.page_id)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground">
-                        {opp.title}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {opp.description}
-                      </p>
-                    </div>
-                    <Badge className={getPriorityColor(opp.priority)}>
-                      {opp.priority}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

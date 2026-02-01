@@ -1,7 +1,3 @@
-/**
- * EmailPlatform - Multi-tenant newsletter & email automation platform
- * Flodesk-inspired design with GrapesJS email editor
- */
 import { useState, useEffect } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -93,6 +89,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
 import useAuthStore from '@/lib/auth-store'
 import { useEmailPlatformStore } from '@/lib/email-platform-store'
 import { EmailEditor } from './EmailEditor'
@@ -100,7 +97,7 @@ import AutomationBuilder from './AutomationBuilder'
 import CampaignComposer from './CampaignComposer'
 import CampaignAnalytics from './CampaignAnalytics'
 import SegmentBuilder from './SegmentBuilder'
-import ImageLibrary from './ImageLibrary'
+const ImageLibrary = lazy(() => import('./ImageLibrary'))
 import ListManagement from './ListManagement'
 import ABTestingPanel from './ABTestingPanel'
 import PeopleTab from './PeopleTab'
@@ -1962,11 +1959,19 @@ function SettingsTab() {
 // ============================================
 // MAIN COMPONENT
 // ============================================
-export default function EmailPlatform() {
+export default function EmailPlatform({
+  embedded = false,
+  /** When provided with onTabChange, only the active tab content is rendered (no Tabs/sidebar). Used by OutreachModule with ModuleLayout. */
+  activeTab: controlledTab,
+  onTabChange: onControlledTabChange,
+}) {
   const location = useLocation()
   const navigate = useNavigate()
   const { currentOrg } = useAuthStore()
-  const [activeTab, setActiveTab] = useState('overview')
+  const [internalTab, setInternalTab] = useState('overview')
+  const activeTab = controlledTab ?? internalTab
+  const setActiveTab = onControlledTabChange ?? setInternalTab
+  const contentOnly = embedded && controlledTab != null && onControlledTabChange != null
   const [showTemplateEditor, setShowTemplateEditor] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [showAutomationBuilder, setShowAutomationBuilder] = useState(false)
@@ -2174,17 +2179,73 @@ export default function EmailPlatform() {
     )
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-[var(--text-primary)]">Outreach</h1>
-        <p className="text-[var(--text-secondary)] mt-1">
-          Create newsletters, automate sequences, and grow your audience
-        </p>
-      </div>
+  // Content-only mode: ModuleLayout owns sidebar; render only active pane + modals
+  if (contentOnly) {
+    return (
+      <div className="h-full p-6">
+        {activeTab === 'overview' && <OverviewTab onNavigate={setActiveTab} />}
+        {activeTab === 'campaigns' && (
+          <CampaignsTab
+            onCreateCampaign={handleCreateCampaign}
+            onEditCampaign={handleEditCampaign}
+            onViewAnalytics={handleViewCampaignAnalytics}
+          />
+        )}
+        {activeTab === 'automations' && (
+          <AutomationsTab
+            onCreateAutomation={handleCreateAutomation}
+            onEditAutomation={handleEditAutomation}
+          />
+        )}
+        {activeTab === 'transactional' && (
+          <TransactionalTab onEditTemplate={handleEditTemplate} />
+        )}
+        {activeTab === 'templates' && (
+          <TemplatesTab
+            onEditTemplate={handleEditTemplate}
+            onCreateTemplate={handleCreateTemplate}
+            onUseSystemTemplate={handleUseSystemTemplate}
+            onOpenImageLibrary={() => setShowImageLibrary(true)}
+          />
+        )}
+        {activeTab === 'subscribers' && (
+          <SubscribersTab onOpenSegmentBuilder={() => setShowSegmentBuilder(true)} />
+        )}
+        {activeTab === 'lists' && <ListManagement />}
+        {activeTab === 'people' && <PeopleTab />}
+        {activeTab === 'testing' && <ABTestingPanel />}
+        {activeTab === 'settings' && <SettingsTab />}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="flex gap-6">
+        <SegmentBuilder
+          open={showSegmentBuilder}
+          onOpenChange={setShowSegmentBuilder}
+          onSave={handleSaveSegment}
+        />
+        <Suspense fallback={null}>
+          <ImageLibrary
+            open={showImageLibrary}
+            onOpenChange={setShowImageLibrary}
+            onSelect={handleSelectImage}
+          />
+        </Suspense>
+      </div>
+    )
+  }
+
+  return (
+    <div className={embedded ? "h-full p-6" : "space-y-6"}>
+      {/* Standalone header - hidden when embedded in ModuleLayout */}
+      {!embedded && (
+        <div>
+          <h1 className="text-3xl font-bold text-[var(--text-primary)]">Outreach</h1>
+          <p className="text-[var(--text-secondary)] mt-1">
+            Create newsletters, automate sequences, and grow your audience
+          </p>
+        </div>
+      )}
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full h-full">
+        <div className="flex gap-6 h-full">
           {/* Sidebar Navigation - Collapsible */}
           <div className={`flex-shrink-0 transition-all duration-300 ${isSidebarCollapsed ? 'w-12' : 'w-48'}`}>
             <div className="flex flex-col h-full">
@@ -2376,11 +2437,13 @@ export default function EmailPlatform() {
         onSave={handleSaveSegment}
       />
 
-      <ImageLibrary
-        open={showImageLibrary}
-        onOpenChange={setShowImageLibrary}
-        onSelect={handleSelectImage}
-      />
+      <Suspense fallback={null}>
+        <ImageLibrary
+          open={showImageLibrary}
+          onOpenChange={setShowImageLibrary}
+          onSelect={handleSelectImage}
+        />
+      </Suspense>
     </div>
   )
 }

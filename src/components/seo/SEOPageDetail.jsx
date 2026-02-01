@@ -1,6 +1,7 @@
 // src/components/seo/SEOPageDetail.jsx
 // Detailed view for a single page
-import { useState, useEffect } from 'react'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { 
   RefreshCw,
   ExternalLink,
-  Loader2,
   TrendingUp,
   TrendingDown,
   CheckCircle,
@@ -27,47 +27,49 @@ import {
   Send,
   Sparkles,
   Eye,
-  ArrowLeft
+  ArrowLeft,
+  Image as ImageIcon,
+  Loader2,
+  Rocket,
 } from 'lucide-react'
-import { useSeoStore } from '@/lib/seo-store'
+import { UptradeSpinner } from '@/components/UptradeLoading'
+import { useSeoPage, useSeoProject, useUpdateSeoPage, useInspectUrl, useGenerateSchema, usePageImages, useUpdatePageImage } from '@/hooks/seo'
+import { useOptimizePage, useAnalyzeContent } from '@/hooks/seo/useSeoSignal'
+import { useSiteImages, useUpdateSiteImage } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
+import { seoApi } from '@/lib/portal-api'
 import { useSEOAIGeneration } from '@/lib/use-seo-ai-generation'
-import { AIPreviewModal, AIGenerateButton } from './signal'
+import { toast } from 'sonner'
+import { AIPreviewModal, AIGenerateButton, ImpactPredictor, SEOPipelineModal } from './signal'
 import SEOSerpPreview from './SEOSerpPreview'
+import SignalIcon from '@/components/ui/SignalIcon'
+import { Progress } from '@/components/ui/progress'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 
 // Main component - fetches page from route params
 export default function SEOPageDetail({ projectId }) {
   const { pageId } = useParams()
   const navigate = useNavigate()
-  const { currentProject, fetchPageDetails } = useSeoStore()
-  const [page, setPage] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
-
-  // Fetch page details on mount or when pageId changes
-  useEffect(() => {
-    async function loadPage() {
-      if (!pageId || !projectId) return
-      
-      setIsLoading(true)
-      try {
-        const pageData = await fetchPageDetails(projectId, pageId)
-        setPage(pageData)
-      } catch (error) {
-        console.error('Failed to load page:', error)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    
-    loadPage()
-  }, [pageId, projectId])
+  
+  // React Query hooks - auto-fetch when IDs are available
+  const { data: currentProject } = useSeoProject(projectId)
+  const { data: page, isLoading } = useSeoPage(projectId, pageId)
 
   // Loading state
   if (isLoading) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
-          <p className="text-muted-foreground">Loading page details...</p>
+          <UptradeSpinner size="md" label="Loading page details..." className="[&_svg]:text-[var(--text-tertiary)]" />
         </CardContent>
       </Card>
     )
@@ -97,21 +99,90 @@ export default function SEOPageDetail({ projectId }) {
 }
 
 // Inner component - safe to use hooks since page is guaranteed to exist
-function SEOPageDetailInner({ page, site }) {
-  const { crawlPage, generateSchema, requestIndexing, inspectUrl } = useSeoStore()
+function SEOPageDetailInner({ page, site, projectId }) {
+  const queryClient = useQueryClient()
+  // Use React Query mutations instead of Zustand store
+  const inspectUrlMutation = useInspectUrl()
+  const updatePageMutation = useUpdateSeoPage()
+  const generateSchemaMutation = useGenerateSchema()
+  
   const { 
     isGenerating: isAIGenerating, 
     suggestions: aiSuggestions, 
     generateTitles, 
     generateMetaDescriptions,
     generateMore,
-    clearSuggestions 
+    clearSuggestions,
+    hasAccess: hasSignalAccess,
+    fetchAltTextSuggestions
   } = useSEOAIGeneration()
+  const pagePath = page.path ?? (() => { try { return page.url ? new URL(page.url).pathname : '' } catch { return '' } })()
+  
+  // Site-managed images (explicit slots) - only fetch if we have a valid page path
+  // Skip fetching if pagePath is empty to avoid returning ALL images
+  const { data: managedImagesRaw = [] } = useSiteImages(projectId, { 
+    page_path: pagePath,
+    enabled: !!pagePath // Don't fetch if no valid path
+  })
+  // Filter to only show images that explicitly match this page path
+  const managedImages = pagePath ? managedImagesRaw.filter(img => img.page_path === pagePath) : []
+  const updateManagedImageMutation = useUpdateSiteImage()
+  
+  // Discovered page images (from site-kit analytics)
+  const { data: discoveredImagesData, isLoading: discoveredImagesLoading } = usePageImages(projectId, page.id)
+  const discoveredImages = discoveredImagesData?.images || []
+  const updatePageImageMutation = useUpdatePageImage()
+  
+  // Unified page optimization with Signal
+  const optimizePageMutation = useOptimizePage()
+  const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false)
+  const [optimizeOptions, setOptimizeOptions] = useState({
+    optimize_alt: true,
+    optimize_meta: true,
+    optimize_schema: true,
+    optimize_llm: true
+  })
+  const [optimizeResults, setOptimizeResults] = useState(null)
+  
+  // Deep Pipeline optimization (Ashbound-style 8-phase)
+  const [pipelineModalOpen, setPipelineModalOpen] = useState(false)
+  
+  // Content analysis with Signal
+  const analyzeContentMutation = useAnalyzeContent()
+  const [contentAnalysis, setContentAnalysis] = useState(null)
+  
+  // Check if page has content available
+  const hasContent = page.content_text || page.content_hash
+  const hasExistingAnalysis = page.content_analyzed_at && page.content_analysis_result
+  
+  const handleAnalyzeContent = async () => {
+    try {
+      const result = await analyzeContentMutation.mutateAsync({
+        projectId,
+        pageIdOrPath: page.id,
+        options: {
+          extract_topics: true,
+          extract_entities: true,
+          extract_keywords: true,
+          analyze_depth: true,
+          analyze_readability: true,
+        }
+      })
+      setContentAnalysis(result)
+      toast.success('Content analysis complete!')
+    } catch (error) {
+      toast.error(error.message || 'Failed to analyze content')
+    }
+  }
+  
+  const [batchAltResults, setBatchAltResults] = useState({})
+  const [batchAltLoading, setBatchAltLoading] = useState(false)
   
   const [crawling, setCrawling] = useState(false)
   const [requestingIndexing, setRequestingIndexing] = useState(false)
   const [generatingSchema, setGeneratingSchema] = useState(false)
   const [inspecting, setInspecting] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [actionMessage, setActionMessage] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [editingTitle, setEditingTitle] = useState(false)
@@ -123,14 +194,59 @@ function SEOPageDetailInner({ page, site }) {
   const [newTitle, setNewTitle] = useState(page.managed_title || page.title || '')
   const [newMeta, setNewMeta] = useState(page.managed_meta_description || page.meta_description || '')
 
+  // Handle unified page optimization
+  const handleOptimizePage = async (apply = false) => {
+    try {
+      const result = await optimizePageMutation.mutateAsync({
+        projectId,
+        pageIdOrPath: page.id,
+        options: optimizeOptions,
+        apply
+      })
+      
+      setOptimizeResults(result)
+      
+      if (apply) {
+        toast.success('Page optimized successfully!')
+        setOptimizeDialogOpen(false)
+        queryClient.invalidateQueries({ queryKey: ['seo', 'page', projectId, page.id] })
+      }
+    } catch (error) {
+      toast.error(error.message || 'Failed to optimize page')
+    }
+  }
+
+  // Save managed metadata
+  const handleSaveMetadata = async () => {
+    setSaving(true)
+    setActionMessage(null)
+    try {
+      await updatePageMutation.mutateAsync({
+        projectId,
+        pageId: page.id,
+        updates: {
+          managed_title: newTitle,
+          managed_meta_description: newMeta,
+        }
+      })
+      setActionMessage({ type: 'success', text: 'Metadata saved successfully' })
+    } catch (err) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to save metadata' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleCrawl = async () => {
     setCrawling(true)
     setActionMessage(null)
     try {
-      await crawlPage(page.id)
-      setActionMessage({ type: 'success', text: 'Page re-crawled successfully' })
+      // Use URL inspection to refresh page data from Google
+      await inspectUrlMutation.mutateAsync({ projectId, url: page.url })
+      queryClient.invalidateQueries({ queryKey: ['seo', 'page', projectId, page.id] })
+      setActionMessage({ type: 'success', text: 'Page inspected successfully' })
     } catch (err) {
-      setActionMessage({ type: 'error', text: err.message || 'Failed to crawl page' })
+      setActionMessage({ type: 'error', text: err.message || 'Failed to inspect page' })
     } finally {
       setCrawling(false)
     }
@@ -140,7 +256,7 @@ function SEOPageDetailInner({ page, site }) {
     setRequestingIndexing(true)
     setActionMessage(null)
     try {
-      await requestIndexing(site?.id, page.url)
+      await seoApi.requestIndexing(projectId, page.url)
       setActionMessage({ type: 'success', text: 'Indexing requested - Google will process within 48 hours' })
     } catch (err) {
       setActionMessage({ type: 'error', text: err.message || 'Failed to request indexing' })
@@ -153,7 +269,8 @@ function SEOPageDetailInner({ page, site }) {
     setGeneratingSchema(true)
     setActionMessage(null)
     try {
-      await generateSchema(site?.id, page.id)
+      await generateSchemaMutation.mutateAsync({ projectId, pageId: page.id })
+      queryClient.invalidateQueries({ queryKey: ['seo', 'page', projectId, page.id] })
       setActionMessage({ type: 'success', text: 'Schema markup generated successfully' })
     } catch (err) {
       setActionMessage({ type: 'error', text: err.message || 'Failed to generate schema' })
@@ -166,7 +283,8 @@ function SEOPageDetailInner({ page, site }) {
     setInspecting(true)
     setActionMessage(null)
     try {
-      await inspectUrl(site?.id, page.url)
+      await inspectUrlMutation.mutateAsync({ projectId, url: page.url })
+      queryClient.invalidateQueries({ queryKey: ['seo', 'page', projectId, page.id] })
       setActionMessage({ type: 'success', text: 'URL inspection complete' })
     } catch (err) {
       setActionMessage({ type: 'error', text: err.message || 'Failed to inspect URL' })
@@ -239,6 +357,76 @@ function SEOPageDetailInner({ page, site }) {
     navigator.clipboard.writeText(text)
   }
 
+  // Combine discovered images (from site-kit) with any that have managed slots
+  const allPageImages = discoveredImages.length > 0 ? discoveredImages : managedImages
+
+  const handleOptimizeAllAlt = async () => {
+    if (!hasSignalAccess || allPageImages.length === 0) return
+    setBatchAltLoading(true)
+    setBatchAltResults({})
+    try {
+      const results = {}
+      await Promise.all(
+        allPageImages.map(async (img) => {
+          try {
+            const suggestions = await fetchAltTextSuggestions({
+              pagePath: pagePath || '/',
+              slotId: img.slot_id,
+              currentAlt: img.current_alt ?? img.alt_text ?? undefined,
+              pageTitle: page.title ?? undefined,
+              filename: img.src?.split('/').pop() ?? img.file?.name ?? img.file?.filename ?? undefined,
+              surroundingText: img.surrounding_text ?? undefined,
+              count: 3,
+            })
+            results[img.id] = { suggestions }
+          } catch (e) {
+            results[img.id] = { error: e?.message || 'Failed' }
+          }
+        })
+      )
+      setBatchAltResults(results)
+      const failed = Object.values(results).filter((r) => r.error).length
+      if (failed > 0) {
+        toast.warning(`${allPageImages.length - failed} optimized, ${failed} failed`)
+      } else {
+        toast.success(`Alt text suggestions generated for ${allPageImages.length} image(s)`)
+      }
+    } catch (e) {
+      toast.error(e?.message || 'Failed to optimize alt text')
+    } finally {
+      setBatchAltLoading(false)
+    }
+  }
+
+  const handleApplyAlt = async (imageId, altText, isDiscovered = false) => {
+    try {
+      if (isDiscovered) {
+        // Update discovered image via new API
+        await updatePageImageMutation.mutateAsync({
+          projectId,
+          pageId: page.id,
+          imageId,
+          updates: { managed_alt: altText },
+        })
+      } else {
+        // Update managed image slot
+        await updateManagedImageMutation.mutateAsync({
+          id: imageId,
+          projectId,
+          data: { alt_text: altText },
+        })
+      }
+      setBatchAltResults((prev) => {
+        const next = { ...prev }
+        delete next[imageId]
+        return next
+      })
+      toast.success('Alt text updated')
+    } catch (e) {
+      toast.error(e?.message || 'Failed to update')
+    }
+  }
+
   const getTitleLengthStatus = (length) => {
     if (!length) return { color: 'text-red-400', message: 'Missing' }
     if (length < 30) return { color: 'text-yellow-400', message: 'Too short' }
@@ -305,6 +493,41 @@ function SEOPageDetailInner({ page, site }) {
           </a>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Deep Optimize with Pipeline - Full world-state aware 8-phase optimization */}
+          {hasSignalAccess && (
+            <Button 
+              variant="default"
+              size="sm"
+              onClick={() => setPipelineModalOpen(true)}
+              title="Run comprehensive 8-phase optimization with full site context, GSC data, and impact prediction"
+              style={{ 
+                background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-secondary))'
+              }}
+              className="text-white shadow-lg"
+            >
+              <Rocket className="h-4 w-4 mr-2" />
+              Deep Optimize
+            </Button>
+          )}
+          
+          {/* Quick Optimize with Signal - Unified optimization */}
+          {hasSignalAccess && (
+            <Button 
+              variant="outline"
+              size="sm"
+              onClick={() => setOptimizeDialogOpen(true)}
+              disabled={optimizePageMutation.isPending}
+              title="Quick optimization for metadata, schema, and alt text"
+            >
+              {optimizePageMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <SignalIcon className="h-4 w-4 mr-2" />
+              )}
+              Quick Optimize
+            </Button>
+          )}
+          
           {/* Request Indexing */}
           <Button 
             variant="outline" 
@@ -314,7 +537,7 @@ function SEOPageDetailInner({ page, site }) {
             title="Request Google to index this page"
           >
             {requestingIndexing ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
             ) : (
               <Send className="h-4 w-4 mr-2" />
             )}
@@ -330,7 +553,7 @@ function SEOPageDetailInner({ page, site }) {
             title="Generate Schema.org markup for this page"
           >
             {generatingSchema ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
             ) : (
               <Code className="h-4 w-4 mr-2" />
             )}
@@ -346,7 +569,7 @@ function SEOPageDetailInner({ page, site }) {
             title="Inspect URL in Google Search Console"
           >
             {inspecting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
             ) : (
               <Search className="h-4 w-4 mr-2" />
             )}
@@ -362,7 +585,7 @@ function SEOPageDetailInner({ page, site }) {
             title="Re-crawl this page for updated metadata"
           >
             {crawling ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
             ) : (
               <RefreshCw className="h-4 w-4 mr-2" />
             )}
@@ -443,6 +666,10 @@ function SEOPageDetailInner({ page, site }) {
             SERP Preview
           </TabsTrigger>
           <TabsTrigger value="metadata">Metadata</TabsTrigger>
+          <TabsTrigger value="schema">
+            <Code className="h-3.5 w-3.5 mr-1.5" />
+            Schema
+          </TabsTrigger>
           <TabsTrigger value="content">Content</TabsTrigger>
           <TabsTrigger value="queries">Queries</TabsTrigger>
           <TabsTrigger value="opportunities">Issues</TabsTrigger>
@@ -555,6 +782,143 @@ function SEOPageDetailInner({ page, site }) {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Image alt text – optimize all for this page */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ImageIcon className="h-4 w-4" />
+                      Page Images
+                      {!discoveredImagesLoading && allPageImages.filter(i => !i.has_alt && !i.alt_text).length > 0 && (
+                        <Badge variant="destructive" className="ml-1">
+                          {allPageImages.filter(i => !i.has_alt && !i.alt_text).length} missing alt
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription>
+                      {discoveredImages.length > 0 
+                        ? 'All images discovered on this page via site-kit analytics.'
+                        : 'Managed image slots for this page. Visit the live page to discover all images.'}
+                    </CardDescription>
+                  </div>
+                  {hasSignalAccess && allPageImages.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleOptimizeAllAlt}
+                      disabled={batchAltLoading}
+                    >
+                      {batchAltLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <SignalIcon className="h-4 w-4 mr-2" />
+                      )}
+                      Optimize All Alt Text
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {discoveredImagesLoading ? (
+                  <div className="py-4 flex items-center justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : allPageImages.length === 0 ? (
+                  <p className="text-sm text-[var(--text-tertiary)]">
+                    No images discovered yet. Visit the page with site-kit installed to auto-discover images.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {allPageImages.map((img) => {
+                      const isDiscovered = !!img.src // discovered images have src, managed have slot_id
+                      const currentAlt = img.current_alt ?? img.alt_text
+                      const hasAlt = img.has_alt ?? !!currentAlt
+                      const imageUrl = img.resolved_url || img.src || img.url
+                      const displayName = img.slot_id || img.src?.split('/').pop() || 'Unknown'
+                      
+                      return (
+                        <div
+                          key={img.id}
+                          className={`rounded-lg border p-3 space-y-2 ${
+                            hasAlt 
+                              ? 'border-[var(--glass-border)]' 
+                              : 'border-yellow-500/50 bg-yellow-500/5'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {imageUrl && (
+                                <img
+                                  src={imageUrl}
+                                  alt=""
+                                  className="h-10 w-10 rounded object-cover flex-shrink-0"
+                                  onError={(e) => { e.target.style.display = 'none' }}
+                                />
+                              )}
+                              <div className="min-w-0">
+                                <span className="font-mono text-sm text-[var(--text-primary)] truncate block">
+                                  {displayName}
+                                </span>
+                                {img.position_in_page && (
+                                  <span className="text-xs text-muted-foreground capitalize">
+                                    {img.position_in_page}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {img.slot_id && (
+                                <Badge variant="outline" className="text-xs">
+                                  Managed
+                                </Badge>
+                              )}
+                              {hasAlt ? (
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="text-sm text-[var(--text-secondary)]">
+                            {hasAlt ? (
+                              <span>Alt: "{currentAlt}"</span>
+                            ) : (
+                              <span className="text-yellow-500">Missing alt text</span>
+                            )}
+                            {img.managed_alt && img.managed_alt !== currentAlt && (
+                              <div className="mt-1 text-xs text-green-500">
+                                Signal suggestion: "{img.managed_alt}"
+                              </div>
+                            )}
+                          </div>
+                          
+                          {batchAltResults[img.id]?.error && (
+                            <p className="text-sm text-red-400">{batchAltResults[img.id].error}</p>
+                          )}
+                          {batchAltResults[img.id]?.suggestions?.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {batchAltResults[img.id].suggestions.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => handleApplyAlt(img.id, s.text, isDiscovered)}
+                                  className="rounded-md border border-border px-2 py-1 text-xs bg-muted/50 hover:bg-muted text-left"
+                                >
+                                  {s.text || '(empty)'}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
           {/* PageSpeed Scores */}
@@ -597,11 +961,24 @@ function SEOPageDetailInner({ page, site }) {
         <TabsContent value="serp-preview" className="mt-6">
           <SEOSerpPreview 
             page={page}
+            domain={site?.domain}
             targetKeyword={page.target_keyword || ''}
             onSave={async (updates) => {
-              // Save managed title/description
-              // TODO: Integrate with seo-store update function
-              console.log('Save SERP updates:', updates)
+              try {
+                await updatePageMutation.mutateAsync({
+                  projectId,
+                  pageId: page.id,
+                  updates: {
+                    managed_title: updates.managed_title ?? updates.managedTitle,
+                    managed_meta_description: updates.managed_meta_description ?? updates.managedMetaDescription,
+                  }
+                })
+                setNewTitle(updates.managed_title ?? updates.managedTitle ?? newTitle)
+                setNewMeta(updates.managed_meta_description ?? updates.managedMetaDescription ?? newMeta)
+                setActionMessage({ type: 'success', text: 'SERP preview saved' })
+              } catch (err) {
+                setActionMessage({ type: 'error', text: err.message || 'Failed to save' })
+              }
             }}
           />
         </TabsContent>
@@ -692,8 +1069,12 @@ function SEOPageDetailInner({ page, site }) {
               </div>
               
               <div className="flex items-center gap-2">
-                <Button>
-                  <Save className="h-4 w-4 mr-2" />
+                <Button onClick={handleSaveMetadata} disabled={saving}>
+                  {saving ? (
+                    <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
                   Save Changes
                 </Button>
                 <Button 
@@ -711,9 +1092,45 @@ function SEOPageDetailInner({ page, site }) {
                   }}
                 >
                   <Sparkles className="h-4 w-4 mr-2" />
-                  Generate with AI
+                  Generate with Signal
                 </Button>
               </div>
+              
+              {/* Predicted impact before saving (Signal ML when available) */}
+              {(newTitle !== (page.managed_title || page.title) || newMeta !== (page.managed_meta_description || page.meta_description)) && (
+                <ImpactPredictor
+                  projectId={site?.id}
+                  pageUrl={page.url}
+                  targetKeyword={page.target_keyword}
+                  changeType="title"
+                  oldValue={page.managed_title || page.title}
+                  newValue={newTitle}
+                  currentMetrics={{
+                    clicks: page.clicks_28d,
+                    impressions: page.impressions_28d,
+                    ctr: page.ctr_28d,
+                    position: page.avg_position_28d,
+                  }}
+                  useBackendPrediction={true}
+                />
+              )}
+              {newMeta !== (page.managed_meta_description || page.meta_description) && newTitle === (page.managed_title || page.title) && (
+                <ImpactPredictor
+                  projectId={site?.id}
+                  pageUrl={page.url}
+                  targetKeyword={page.target_keyword}
+                  changeType="meta_description"
+                  oldValue={page.managed_meta_description || page.meta_description}
+                  newValue={newMeta}
+                  currentMetrics={{
+                    clicks: page.clicks_28d,
+                    impressions: page.impressions_28d,
+                    ctr: page.ctr_28d,
+                    position: page.avg_position_28d,
+                  }}
+                  useBackendPrediction={true}
+                />
+              )}
             </CardContent>
           </Card>
           
@@ -754,13 +1171,438 @@ function SEOPageDetailInner({ page, site }) {
           />
         </TabsContent>
 
-        <TabsContent value="content" className="mt-6">
+        <TabsContent value="schema" className="mt-6 space-y-6">
+          {/* Schema Status Card */}
           <Card>
-            <CardContent className="py-8 text-center text-[var(--text-tertiary)]">
-              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Content analysis coming soon...</p>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Code className="h-4 w-4" />
+                    Schema Markup
+                  </CardTitle>
+                  <CardDescription>
+                    Structured data for this page
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  {page.has_schema ? (
+                    <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Has Schema
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-yellow-500 border-yellow-500/30">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      No Schema
+                    </Badge>
+                  )}
+                  {hasSignalAccess && (
+                    <Button
+                      size="sm"
+                      onClick={handleGenerateSchema}
+                      disabled={generatingSchema}
+                    >
+                      {generatingSchema ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 mr-2" />
+                      )}
+                      {page.managed_schema ? 'Regenerate' : 'Generate'} Schema
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Detected Schema Types */}
+              {page.schema_types && Object.keys(page.schema_types).length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2 text-[var(--text-secondary)]">
+                    Detected on Page
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {(Array.isArray(page.schema_types) ? page.schema_types : Object.keys(page.schema_types)).map((type) => (
+                      <Badge key={type} variant="outline">
+                        {type}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Validation Errors */}
+              {page.schema_validation_errors && page.schema_validation_errors.length > 0 && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <h4 className="text-sm font-medium text-red-400 mb-2">Validation Errors</h4>
+                  <ul className="text-sm text-red-300 space-y-1">
+                    {page.schema_validation_errors.map((err, i) => (
+                      <li key={i}>• {err.message || err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </CardContent>
           </Card>
+
+          {/* Managed Schema (JSON-LD) */}
+          {page.managed_schema && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base">Managed Schema (JSON-LD)</CardTitle>
+                    <CardDescription>
+                      Copy this to your page's &lt;head&gt; section or use site-kit's ManagedSchema component
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const script = `<script type="application/ld+json">\n${JSON.stringify(page.managed_schema, null, 2)}\n</script>`
+                      navigator.clipboard.writeText(script)
+                      toast.success('Schema copied to clipboard')
+                    }}
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy HTML
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <pre className="bg-slate-900 text-slate-100 p-4 rounded-lg overflow-x-auto text-sm max-h-96">
+                  <code>{JSON.stringify(page.managed_schema, null, 2)}</code>
+                </pre>
+                {page.schema_validated_at && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Last validated: {new Date(page.schema_validated_at).toLocaleString()}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* LLM Schema (for AI visibility) */}
+          {page.managed_llm_schema && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <SignalIcon className="h-4 w-4" />
+                      LLM Schema
+                    </CardTitle>
+                    <CardDescription>
+                      Enhanced structured data optimized for AI/LLM understanding
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(page.managed_llm_schema, null, 2))
+                      toast.success('LLM schema copied to clipboard')
+                    }}
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy JSON
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <pre className="bg-slate-900 text-slate-100 p-4 rounded-lg overflow-x-auto text-sm max-h-96">
+                  <code>{JSON.stringify(page.managed_llm_schema, null, 2)}</code>
+                </pre>
+                {page.llm_schema_generated_at && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Generated: {new Date(page.llm_schema_generated_at).toLocaleString()}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Empty state - no schema yet */}
+          {!page.managed_schema && !page.managed_llm_schema && !page.has_schema && (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <Code className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+                <h3 className="text-lg font-semibold mb-2">No Schema Markup</h3>
+                <p className="text-muted-foreground mb-4">
+                  Add structured data to help search engines understand your content
+                </p>
+                {hasSignalAccess && (
+                  <Button onClick={handleGenerateSchema} disabled={generatingSchema}>
+                    {generatingSchema ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 mr-2" />
+                    )}
+                    Generate Schema with Signal
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="content" className="mt-6 space-y-6">
+          {/* Content Status Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <FileText className="h-5 w-5" style={{ color: 'var(--brand-primary)' }} />
+                Content Analysis
+              </CardTitle>
+              <CardDescription>
+                {hasContent 
+                  ? 'Signal AI can analyze your page content for SEO insights'
+                  : 'Visit this page with Site-Kit enabled to capture content for analysis'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!hasContent ? (
+                <div className="text-center py-8 text-[var(--text-tertiary)]">
+                  <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="mb-2">No content captured yet</p>
+                  <p className="text-sm">When visitors browse this page with Site-Kit installed, content will be automatically captured for analysis.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Content Stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="p-4 rounded-lg bg-[var(--bg-secondary)]">
+                      <div className="text-2xl font-bold text-[var(--text-primary)]">{page.word_count || 0}</div>
+                      <div className="text-sm text-[var(--text-tertiary)]">Words</div>
+                    </div>
+                    <div className="p-4 rounded-lg bg-[var(--bg-secondary)]">
+                      <div className="text-2xl font-bold text-[var(--text-primary)]">{page.reading_time_minutes || Math.ceil((page.word_count || 0) / 225)}</div>
+                      <div className="text-sm text-[var(--text-tertiary)]">Min Read</div>
+                    </div>
+                    <div className="p-4 rounded-lg bg-[var(--bg-secondary)]">
+                      <div className="text-2xl font-bold text-[var(--text-primary)]">{page.heading_structure?.length || 0}</div>
+                      <div className="text-sm text-[var(--text-tertiary)]">Headings</div>
+                    </div>
+                    <div className="p-4 rounded-lg bg-[var(--bg-secondary)]">
+                      <div className="text-2xl font-bold text-[var(--text-primary)]">{page.content_depth_score || '—'}</div>
+                      <div className="text-sm text-[var(--text-tertiary)]">Depth Score</div>
+                    </div>
+                  </div>
+
+                  {/* Heading Structure */}
+                  {page.heading_structure && page.heading_structure.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-[var(--text-secondary)] mb-2">Heading Structure</h4>
+                      <div className="space-y-1 text-sm">
+                        {page.heading_structure.slice(0, 10).map((h, idx) => (
+                          <div 
+                            key={idx} 
+                            className="flex items-center gap-2 py-1"
+                            style={{ paddingLeft: `${(h.level - 1) * 16}px` }}
+                          >
+                            <Badge variant="outline" className="text-xs">H{h.level}</Badge>
+                            <span className="text-[var(--text-primary)] truncate">{h.text}</span>
+                          </div>
+                        ))}
+                        {page.heading_structure.length > 10 && (
+                          <div className="text-xs text-[var(--text-tertiary)] pl-4">
+                            +{page.heading_structure.length - 10} more headings
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Detected FAQs */}
+                  {page.faq_detected && page.faq_detected.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-400" />
+                        Detected FAQs ({page.faq_detected.length})
+                      </h4>
+                      <div className="space-y-2">
+                        {page.faq_detected.slice(0, 5).map((faq, idx) => (
+                          <div key={idx} className="p-3 rounded-lg bg-[var(--bg-secondary)] text-sm">
+                            <div className="font-medium text-[var(--text-primary)]">{faq.question}</div>
+                            <div className="text-[var(--text-tertiary)] mt-1 line-clamp-2">{faq.answer}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Analyze Button */}
+                  <div className="flex items-center gap-4 pt-4 border-t border-[var(--border-primary)]">
+                    <Button
+                      onClick={handleAnalyzeContent}
+                      disabled={analyzeContentMutation.isPending}
+                      style={{ 
+                        background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-secondary))'
+                      }}
+                      className="text-white"
+                    >
+                      {analyzeContentMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Analyzing...
+                        </>
+                      ) : (
+                        <>
+                          <SignalIcon className="h-4 w-4 mr-2" />
+                          Analyze with Signal
+                        </>
+                      )}
+                    </Button>
+                    {hasExistingAnalysis && (
+                      <span className="text-xs text-[var(--text-tertiary)]">
+                        Last analyzed: {new Date(page.content_analyzed_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Analysis Results */}
+          {(contentAnalysis || page.content_analysis_result) && (
+            <div className="space-y-6">
+              {/* Topics */}
+              {(contentAnalysis?.topics || page.content_topics) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Topics & Themes</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-2">
+                      {(contentAnalysis?.topics || page.content_topics)?.map((topic, idx) => (
+                        <div 
+                          key={idx}
+                          className="px-3 py-2 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)]"
+                        >
+                          <div className="font-medium text-sm">{topic.name}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Progress value={topic.relevance_score} className="h-1 w-16" />
+                            <span className="text-xs text-[var(--text-tertiary)]">{topic.relevance_score}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Keywords */}
+              {(contentAnalysis?.keywords || page.content_keywords) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Keywords</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {(contentAnalysis?.keywords || page.content_keywords)?.slice(0, 10).map((kw, idx) => (
+                        <div key={idx} className="flex items-center justify-between py-2 border-b border-[var(--border-secondary)] last:border-0">
+                          <div className="flex items-center gap-3">
+                            <span className="font-medium text-sm">{kw.keyword}</span>
+                            <Badge 
+                              variant={kw.prominence === 'high' ? 'default' : 'outline'}
+                              className={kw.prominence === 'high' ? 'bg-green-500/20 text-green-400 border-green-500/30' : ''}
+                            >
+                              {kw.prominence}
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-[var(--text-tertiary)]">
+                            {kw.frequency}x
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Entities */}
+              {(contentAnalysis?.entities || page.content_entities) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Named Entities</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {(contentAnalysis?.entities || page.content_entities)?.map((entity, idx) => (
+                        <div key={idx} className="p-3 rounded-lg bg-[var(--bg-secondary)]">
+                          <div className="font-medium text-sm">{entity.name}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">{entity.type}</Badge>
+                            <span className="text-xs text-[var(--text-tertiary)]">{entity.mentions_count} mentions</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Recommendations */}
+              {(contentAnalysis?.recommendations || page.content_recommendations) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Zap className="h-4 w-4" style={{ color: 'var(--brand-primary)' }} />
+                      Recommendations
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {(contentAnalysis?.recommendations || page.content_recommendations)?.map((rec, idx) => (
+                        <div key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-[var(--bg-secondary)]">
+                          <div 
+                            className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                            style={{ backgroundColor: 'color-mix(in srgb, var(--brand-primary) 20%, transparent)', color: 'var(--brand-primary)' }}
+                          >
+                            {idx + 1}
+                          </div>
+                          <div className="text-sm text-[var(--text-primary)]">{rec}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* SEO Opportunities */}
+              {(contentAnalysis?.seo_opportunities) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">SEO Opportunities</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {contentAnalysis.seo_opportunities.map((opp, idx) => (
+                        <div key={idx} className="p-3 rounded-lg border border-[var(--border-primary)]">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm">{opp.opportunity}</span>
+                            <Badge 
+                              className={
+                                opp.impact === 'high' ? 'bg-green-500/20 text-green-400' :
+                                opp.impact === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-gray-500/20 text-gray-400'
+                              }
+                            >
+                              {opp.impact} impact
+                            </Badge>
+                            <Badge variant="outline">{opp.effort} effort</Badge>
+                          </div>
+                          <p className="text-sm text-[var(--text-tertiary)]">{opp.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="queries" className="mt-6">
@@ -781,6 +1623,191 @@ function SEOPageDetailInner({ page, site }) {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
-  )
-}
+
+      {/* Optimize with Signal Dialog */}
+      <Dialog open={optimizeDialogOpen} onOpenChange={setOptimizeDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <SignalIcon className="h-5 w-5" style={{ color: 'var(--brand-primary)' }} />
+              Optimize Page with Signal
+            </DialogTitle>
+            <DialogDescription>
+              Signal AI will analyze this page and generate optimized metadata, schema markup, 
+              and alt text for images - all at once with full page context.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Optimization Options */}
+            <div className="space-y-4">
+              <Label className="text-sm font-medium">What to optimize:</Label>
+              <div className="grid grid-cols-2 gap-4">
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-[var(--border-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer">
+                  <Checkbox
+                    checked={optimizeOptions.optimize_meta}
+                    onCheckedChange={(checked) => setOptimizeOptions(prev => ({ ...prev, optimize_meta: checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-sm">Title & Description</div>
+                    <div className="text-xs text-[var(--text-tertiary)]">SEO-optimized title and meta description</div>
+                  </div>
+                </label>
+                
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-[var(--border-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer">
+                  <Checkbox
+                    checked={optimizeOptions.optimize_alt}
+                    onCheckedChange={(checked) => setOptimizeOptions(prev => ({ ...prev, optimize_alt: checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-sm">Image Alt Text</div>
+                    <div className="text-xs text-[var(--text-tertiary)]">{discoveredImages.length + managedImages.length} images on this page</div>
+                  </div>
+                </label>
+                
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-[var(--border-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer">
+                  <Checkbox
+                    checked={optimizeOptions.optimize_schema}
+                    onCheckedChange={(checked) => setOptimizeOptions(prev => ({ ...prev, optimize_schema: checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-sm">Schema Markup</div>
+                    <div className="text-xs text-[var(--text-tertiary)]">Structured data for search engines</div>
+                  </div>
+                </label>
+                
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-[var(--border-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer">
+                  <Checkbox
+                    checked={optimizeOptions.optimize_llm}
+                    onCheckedChange={(checked) => setOptimizeOptions(prev => ({ ...prev, optimize_llm: checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-sm">LLM Schema</div>
+                    <div className="text-xs text-[var(--text-tertiary)]">AI-optimized llms.txt content</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Results Preview */}
+            {optimizeResults && !optimizeResults.applied && (
+              <div className="space-y-4 border-t pt-4">
+                <Label className="text-sm font-medium text-green-400 flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Optimization Results
+                </Label>
+                
+                {/* Meta Results */}
+                {optimizeResults.results?.meta && (
+                  <div className="space-y-2 p-3 rounded-lg bg-[var(--bg-secondary)]">
+                    <div className="text-xs font-medium text-[var(--text-tertiary)]">TITLE</div>
+                    <div className="text-sm">{optimizeResults.results.meta.title}</div>
+                    <div className="text-xs font-medium text-[var(--text-tertiary)] mt-2">DESCRIPTION</div>
+                    <div className="text-sm">{optimizeResults.results.meta.description}</div>
+                  </div>
+                )}
+                
+                {/* Alt Text Results */}
+                {optimizeResults.results?.alt_text?.length > 0 && (
+                  <div className="space-y-2 p-3 rounded-lg bg-[var(--bg-secondary)]">
+                    <div className="text-xs font-medium text-[var(--text-tertiary)]">
+                      ALT TEXT ({optimizeResults.results.alt_text.length} images)
+                    </div>
+                    <div className="space-y-2 max-h-40 overflow-auto">
+                      {optimizeResults.results.alt_text.slice(0, 5).map((img, idx) => (
+                        <div key={idx} className="text-xs p-2 bg-[var(--bg-primary)] rounded">
+                          <span className="text-[var(--text-tertiary)]">→</span> {img.optimized_alt}
+                        </div>
+                      ))}
+                      {optimizeResults.results.alt_text.length > 5 && (
+                        <div className="text-xs text-[var(--text-tertiary)]">
+                          +{optimizeResults.results.alt_text.length - 5} more images
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Schema Results */}
+                {optimizeResults.results?.schema && (
+                  <div className="space-y-2 p-3 rounded-lg bg-[var(--bg-secondary)]">
+                    <div className="text-xs font-medium text-[var(--text-tertiary)]">
+                      SCHEMA ({optimizeResults.results.schema.type})
+                    </div>
+                    <div className="text-xs text-green-400">✓ Schema generated</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={() => setOptimizeDialogOpen(false)}>
+              Cancel
+            </Button>
+            
+            {!optimizeResults ? (
+              <Button
+                onClick={() => handleOptimizePage(false)}
+                disabled={optimizePageMutation.isPending || !Object.values(optimizeOptions).some(Boolean)}
+                style={{ 
+                  background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-secondary))'
+                }}
+                className="text-white"
+              >
+                {optimizePageMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <SignalIcon className="h-4 w-4 mr-2" />
+                    Generate Optimizations
+                  </>
+                )}
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setOptimizeResults(null)}
+                >
+                  Regenerate
+                </Button>
+                <Button
+                  onClick={() => handleOptimizePage(true)}
+                  disabled={optimizePageMutation.isPending}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {optimizePageMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Applying...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Apply Changes
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deep Optimization Pipeline Modal */}
+      <SEOPipelineModal
+        open={pipelineModalOpen}
+        onOpenChange={setPipelineModalOpen}
+        projectId={projectId}
+        pageIdOrPath={page.id}
+        pagePath={page.path}
+        onComplete={(result) => {
+          // Refresh page data when pipeline completes
+          queryClient.invalidateQueries({ queryKey: ['seo', 'page', projectId, page.id] })
+          toast.success('Deep optimization complete!')
+        }}
+      />

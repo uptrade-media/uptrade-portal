@@ -1,7 +1,8 @@
 // src/components/affiliates/AffiliateDetailPanel.jsx
 // Right panel showing affiliate details with tabs
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   Edit,
   Trash2,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { EmptyState } from '@/components/EmptyState'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -41,7 +43,16 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import useAuthStore from '@/lib/auth-store'
-import useAffiliatesStore from '@/lib/affiliates-store'
+import { 
+  useAffiliate, 
+  useAffiliateOffers, 
+  useAffiliateClicks, 
+  useAffiliateConversions,
+  useUpdateAffiliate,
+  useDeleteAffiliate,
+  affiliatesKeys 
+} from '@/lib/hooks/use-affiliates'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import CreateConversionDialog from './CreateConversionDialog'
 import EditAffiliateDialog from './EditAffiliateDialog'
@@ -172,11 +183,13 @@ function OffersTab({ affiliate, offers }) {
   return (
     <div className="p-6">
       {offers.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Link2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
-          <p>No offers created yet</p>
-          <p className="text-sm mt-1">Create an offer to generate tracking links</p>
-        </div>
+        <EmptyState.Card
+          icon={Link2}
+          title="No offers created yet"
+          description="Create an offer to generate tracking links"
+          actionLabel={onCreateOffer != null ? 'Create Offer' : undefined}
+          onAction={onCreateOffer}
+        />
       ) : (
         <div className="space-y-4">
           {offers.filter(o => o.is_active).map(offer => {
@@ -241,13 +254,8 @@ function OffersTab({ affiliate, offers }) {
 
 function ConversionsTab({ affiliate }) {
   const { currentProject } = useAuthStore()
-  const { conversions, fetchConversions } = useAffiliatesStore()
-
-  useEffect(() => {
-    if (currentProject?.id && affiliate?.id) {
-      fetchConversions(currentProject.id, affiliate.id)
-    }
-  }, [currentProject?.id, affiliate?.id, fetchConversions])
+  // React Query hook auto-fetches when projectId and affiliateId are available
+  const { data: conversions = [] } = useAffiliateConversions(currentProject?.id, affiliate?.id)
 
   const affiliateConversions = conversions.filter(c => c.affiliate_id === affiliate.id)
 
@@ -327,14 +335,21 @@ function ConversionsTab({ affiliate }) {
 
 export default function AffiliateDetailPanel({ affiliate, offers }) {
   const { currentProject } = useAuthStore()
-  const { updateAffiliate, deleteAffiliate, fetchAffiliates } = useAffiliatesStore()
+  const queryClient = useQueryClient()
+  
+  // React Query mutations
+  const updateAffiliateMutation = useUpdateAffiliate()
+  const deleteAffiliateMutation = useDeleteAffiliate()
+  
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
 
   const handleToggleStatus = async () => {
     const newStatus = affiliate.status === 'active' ? 'paused' : 'active'
     try {
-      await updateAffiliate(affiliate.id, { status: newStatus })
+      await updateAffiliateMutation.mutateAsync({ 
+        affiliateId: affiliate.id, 
+        updates: { status: newStatus } 
+      })
       toast.success(`Affiliate ${newStatus === 'active' ? 'activated' : 'paused'}`)
     } catch (error) {
       toast.error('Failed to update status')
@@ -342,15 +357,12 @@ export default function AffiliateDetailPanel({ affiliate, offers }) {
   }
 
   const handleDelete = async () => {
-    setIsDeleting(true)
     try {
-      await deleteAffiliate(affiliate.id)
+      await deleteAffiliateMutation.mutateAsync(affiliate.id)
       toast.success('Affiliate deleted')
       setShowDeleteDialog(false)
     } catch (error) {
       toast.error('Failed to delete affiliate')
-    } finally {
-      setIsDeleting(false)
     }
   }
 
@@ -358,9 +370,9 @@ export default function AffiliateDetailPanel({ affiliate, offers }) {
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="p-6 border-b border-[var(--glass-border)]">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center overflow-hidden">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-4 min-w-0 flex-1">
+            <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center overflow-hidden shrink-0">
               {affiliate.logo_url ? (
                 <img 
                   src={affiliate.logo_url} 
@@ -371,14 +383,14 @@ export default function AffiliateDetailPanel({ affiliate, offers }) {
                 <Globe className="h-6 w-6 text-muted-foreground" />
               )}
             </div>
-            <div>
-              <h2 className="text-xl font-semibold">{affiliate.name}</h2>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant={affiliate.status === 'active' ? 'default' : 'secondary'}>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xl font-semibold truncate">{affiliate.name}</h2>
+              <div className="flex items-center gap-2 mt-1 min-w-0">
+                <Badge variant={affiliate.status === 'active' ? 'default' : 'secondary'} className="shrink-0">
                   {affiliate.status}
                 </Badge>
                 {affiliate.website_url && (
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-sm text-muted-foreground truncate">
                     {affiliate.website_url.replace(/^https?:\/\//, '')}
                   </span>
                 )}

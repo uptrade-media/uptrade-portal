@@ -1,3 +1,8 @@
+/* Google Fonts - must be at top */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
 /* Print styles for PDF export */
 @media print {
   /* Hide all UI chrome */
@@ -81,8 +86,6 @@
    iOS 26 / Apple Design Language
    ================================================ */
 
-@import "tailwindcss";
-
 /* ------------------------------------------------
    LIGHT THEME (Default)
    ------------------------------------------------ */
@@ -91,10 +94,10 @@
   --surface-page: #f5f5f7;
   --surface-page-secondary: #ffffff;
   
-  /* Glass surfaces */
-  --glass-bg: rgba(255, 255, 255, 0.72);
-  --glass-bg-hover: rgba(255, 255, 255, 0.82);
-  --glass-bg-elevated: rgba(255, 255, 255, 0.88);
+  /* Glass surfaces - 50% tint for wave background visibility */
+  --glass-bg: rgba(255, 255, 255, 0.20);
+  --glass-bg-hover: rgba(255, 255, 255, 0.60);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.70);
   --glass-bg-inset: rgba(0, 0, 0, 0.03);
   
   /* Glass borders */
@@ -162,11 +165,11 @@
   --shadow-glass-elevated: 0 12px 40px rgba(0, 0, 0, 0.10),
                            inset 0 0 0 0.5px rgba(255, 255, 255, 0.6);
   
-  /* Blur amounts */
-  --blur-sm: 8px;
-  --blur-md: 16px;
-  --blur-lg: 24px;
-  --blur-xl: 40px;
+  /* Blur amounts - increased for wave background */
+  --blur-sm: 12px;
+  --blur-md: 24px;
+  --blur-lg: 40px;
+  --blur-xl: 56px;
   
   /* Border radius */
   --radius-xs: 4px;
@@ -205,18 +208,18 @@
 .dark {
   /* Page background */
   --surface-page: #000000;
-  --surface-page-secondary: #1c1c1e;
+  --surface-page-secondary: #0a0a0a;
   
-  /* Glass surfaces */
-  --glass-bg: rgba(44, 44, 46, 0.72);
-  --glass-bg-hover: rgba(58, 58, 60, 0.78);
-  --glass-bg-elevated: rgba(58, 58, 60, 0.88);
-  --glass-bg-inset: rgba(255, 255, 255, 0.04);
+  /* Ultra Glass surfaces - 50% tint for wave background visibility */
+  --glass-bg: rgba(0, 0, 0, 0.20);
+  --glass-bg-hover: rgba(0, 0, 0, 0.55);
+  --glass-bg-elevated: rgba(0, 0, 0, 0.60);
+  --glass-bg-inset: rgba(0, 0, 0, 0.25);
   
-  /* Glass borders */
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-strong: rgba(255, 255, 255, 0.15);
-  --glass-ring: rgba(255, 255, 255, 0.1);
+  /* Glass borders - crisp white edges for liquid effect */
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-border-strong: rgba(255, 255, 255, 0.28);
+  --glass-ring: rgba(255, 255, 255, 0.20);
   
   /* Text colors */
   --text-primary: rgba(255, 255, 255, 0.92);
@@ -227,15 +230,25 @@
   /* Inverted surface (for tooltips, etc) */
   --surface-inverted: rgba(250, 250, 250, 0.95);
   
-  /* Shadows (more subtle in dark mode) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.3);
-  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.4);
-  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.25), 
-                  inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
-  --shadow-glass-elevated: 0 12px 40px rgba(0, 0, 0, 0.35),
-                           inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  /* Shadows - liquid glass depth */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.5);
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.5), 
+                  0 0 1px rgba(255, 255, 255, 0.3),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.15),
+                  inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+  --shadow-glass-elevated: 0 16px 48px rgba(0, 0, 0, 0.6),
+                           0 0 1px rgba(255, 255, 255, 0.4),
+                           inset 0 1px 0 rgba(255, 255, 255, 0.2),
+                           inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  
+  /* Ultra blur for liquid glass - wave background */
+  --blur-sm: 16px;
+  --blur-md: 32px;
+  --blur-lg: 56px;
+  --blur-xl: 72px;
   
   /* Color scheme for native elements */
   color-scheme: dark;
@@ -252,8 +265,7 @@ html {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 
-               'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
   background-color: var(--surface-page);
   color: var(--text-primary);
   transition: background-color var(--transition-normal), 
@@ -262,32 +274,41 @@ body {
   margin: 0;
 }
 
+/* Headings use SF Pro Display */
+h1, h2, h3, h4, h5, h6 {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
+  font-weight: 600;
+}
+
 #root {
   height: 100%;
 }
 
 /* ------------------------------------------------
-   GLASS UTILITIES
+   GLASS UTILITIES - Ultra Glassmorphism
    ------------------------------------------------ */
 .glass {
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--blur-lg));
-  -webkit-backdrop-filter: blur(var(--blur-lg));
-  border: 0.5px solid var(--glass-border);
+  backdrop-filter: blur(var(--blur-lg)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(180%);
+  border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-glass);
 }
 
 .glass-elevated {
   background: var(--glass-bg-elevated);
-  backdrop-filter: blur(var(--blur-xl));
-  -webkit-backdrop-filter: blur(var(--blur-xl));
-  border: 0.5px solid var(--glass-border);
+  backdrop-filter: blur(var(--blur-xl)) saturate(200%);
+  -webkit-backdrop-filter: blur(var(--blur-xl)) saturate(200%);
+  border: 1px solid var(--glass-border-strong);
   box-shadow: var(--shadow-glass-elevated);
 }
 
 .glass-inset {
   background: var(--glass-bg-inset);
-  border: 0.5px solid var(--glass-border);
+  backdrop-filter: blur(var(--blur-md)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 /* ------------------------------------------------
@@ -318,6 +339,49 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+}
+
+/* Hide scrollbar while keeping scroll (e.g. ModuleLayout columns) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* ModuleLayout three columns: hide all scrollbars (native + Radix ScrollArea) */
+[data-module-column] {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+[data-module-column]::-webkit-scrollbar {
+  display: none !important;
+}
+[data-module-column] [data-slot="scroll-area-scrollbar"] {
+  display: none !important;
+}
+[data-module-column] [data-slot="scroll-area-viewport"] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+[data-module-column] [data-slot="scroll-area-viewport"]::-webkit-scrollbar {
+  display: none !important;
+}
+[data-module-column] .overflow-auto::-webkit-scrollbar,
+[data-module-column] .overflow-y-auto::-webkit-scrollbar,
+[data-module-column] .overflow-x-auto::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* ------------------------------------------------
+   TOUCH TARGETS (44px minimum on touch devices)
+   ------------------------------------------------ */
+@media (pointer: coarse) {
+  .touch-target-min {
+    min-height: 44px;
+    min-width: 44px;
+  }
 }
 
 /* ------------------------------------------------
@@ -692,3 +756,43 @@ body {
 .dark .recharts-legend-item-text {
   fill: rgba(255, 255, 255, 0.72) !important;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ChatKit Customization
+ * Custom styles for the ChatKit component to match portal theme
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+/* Container styling */
+.chatkit-portal-container {
+  min-height: 300px;
+}
+
+/* Main ChatKit iframe container */
+.chatkit-portal iframe {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+/* Override ChatKit's internal styling via CSS variables */
+.chatkit-portal-container {
+  /* Brand-aware accent color - uses CSS custom properties from ThemeProvider */
+  --chatkit-accent-primary: var(--brand-primary) !important;
+  --chatkit-accent-hover: var(--brand-primary-hover) !important;
+}
+
+/* Dark theme enforcement for ChatKit */
+.chatkit-dark {
+  color-scheme: dark;
+}
+
+/* Messages module: reduced motion (Phase 3.9.2) */
+@media (prefers-reduced-motion: reduce) {
+  [data-messages] .animate-pulse {
+    animation: none;
+  }
+  [data-messages] * {
+    transition-duration: 0.05s !important;
+  }
+}
+

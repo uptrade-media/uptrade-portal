@@ -1,11 +1,8 @@
 /**
  * Shared Messages UI Components
- * 
- * These components are used by both:
- * - MessagesNew.jsx (full-page module)
- * - ChatBubbleSingle.jsx (floating widget)
- * 
- * Design: Liquid Glass aesthetic with consistent behavior
+ *
+ * Used by the messages module (MessagesModuleV2, etc.).
+ * Design: Liquid Glass aesthetic with consistent behavior.
  */
 import { forwardRef } from 'react'
 import { cn } from '@/lib/utils'

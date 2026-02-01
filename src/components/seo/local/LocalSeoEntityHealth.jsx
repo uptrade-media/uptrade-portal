@@ -1,7 +1,7 @@
 // src/components/seo/local/LocalSeoEntityHealth.jsx
 // Entity Health Score - GBP optimization and local signals
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useState } from 'react'
+import { useEntityHealth, useRefreshEntityHealth } from '@/lib/hooks/use-seo'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -60,30 +60,23 @@ const getTrendIcon = (current, previous) => {
 }
 
 export default function LocalSeoEntityHealth({ projectId }) {
-  const [isLoading, setIsLoading] = useState(false)
   const [expandedSignal, setExpandedSignal] = useState(null)
 
+  // React Query hooks
   const { 
-    entityScore,
-    fetchEntityScore,
-    refreshEntityScore,
-    entityScoreLoading
-  } = useSeoStore()
-
-  useEffect(() => {
-    if (projectId) {
-      fetchEntityScore(projectId)
-    }
-  }, [projectId])
+    data: entityScore,
+    isLoading: entityScoreLoading
+  } = useEntityHealth(projectId)
+  
+  const refreshMutation = useRefreshEntityHealth()
+  const isLoading = refreshMutation.isPending
 
   const handleRefresh = async () => {
-    setIsLoading(true)
     try {
-      await refreshEntityScore(projectId)
+      await refreshMutation.mutateAsync({ projectId })
     } catch (error) {
       console.error('Failed to refresh entity score:', error)
     }
-    setIsLoading(false)
   }
 
   // Group issues by severity

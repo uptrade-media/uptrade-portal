@@ -13,5 +13,4 @@ export { PostsList } from './PostsList';
 export { ReelComposer } from './ReelComposer';
 export { StoryComposer } from './StoryComposer';
 export { TemplatesGrid } from './TemplatesGrid';
-export { TrendingSounds } from './TrendingSounds';
 export { UnifiedInbox } from './UnifiedInbox';

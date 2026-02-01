@@ -1,5 +1,6 @@
 // src/components/seo/signal/ImpactPredictor.jsx
 // ML-based prediction of CTR/ranking changes before applying
+// Connects to Signal API RankingPredictionService for backend predictions
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,6 +28,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { signalSeoApi } from '@/lib/signal-api';
+import { useSignalAccess } from '@/lib/signal-access';
+import SignalIcon from '@/components/ui/SignalIcon';
 
 // Prediction confidence thresholds
 const CONFIDENCE_LEVELS = {
@@ -197,10 +201,16 @@ export function ImpactPredictor({
   currentMetrics = {},
   compact = false,
   className,
+  projectId,
+  pageUrl,
+  targetKeyword,
+  useBackendPrediction = false, // Enable ML prediction from Signal API
 }) {
+  const { hasAccess: hasSignalAccess } = useSignalAccess();
   const [prediction, setPrediction] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [predictionSource, setPredictionSource] = useState('local'); // 'local' or 'signal'
 
   useEffect(() => {
     if (!oldValue && !newValue) {
@@ -208,16 +218,50 @@ export function ImpactPredictor({
       return;
     }
 
-    // Simulate async prediction (in real app, could call AI API)
-    setLoading(true);
-    const timer = setTimeout(() => {
+    const fetchPrediction = async () => {
+      setLoading(true);
+      
+      // Try Signal API for ML-based prediction if enabled and has access
+      if (useBackendPrediction && hasSignalAccess && projectId) {
+        try {
+          const mlPrediction = await signalSeoApi.predictRankingImpact(projectId, {
+            changeType,
+            oldValue,
+            newValue,
+            pageUrl,
+            targetKeyword,
+            currentMetrics,
+          });
+          
+          if (mlPrediction) {
+            setPrediction({
+              ctr_change: mlPrediction.ctr_change || 0,
+              ranking_change: mlPrediction.ranking_change || 0,
+              impressions_change: mlPrediction.impressions_change || 0,
+              confidence: mlPrediction.confidence || 50,
+              factors: mlPrediction.factors || [],
+              warnings: mlPrediction.warnings || [],
+              predicted_position: mlPrediction.predicted_position,
+              competitor_analysis: mlPrediction.competitor_analysis,
+            });
+            setPredictionSource('signal');
+            setLoading(false);
+            return;
+          }
+        } catch (error) {
+          console.warn('Failed to get ML prediction, falling back to local:', error);
+        }
+      }
+      
+      // Fall back to local heuristic prediction
       const result = predictImpact(changeType, oldValue, newValue, currentMetrics);
       setPrediction(result);
+      setPredictionSource('local');
       setLoading(false);
-    }, 300);
+    };
 
-    return () => clearTimeout(timer);
-  }, [changeType, oldValue, newValue, currentMetrics]);
+    fetchPrediction();
+  }, [changeType, oldValue, newValue, currentMetrics, useBackendPrediction, hasSignalAccess, projectId, pageUrl, targetKeyword]);
 
   if (!prediction && !loading) return null;
 
@@ -285,13 +329,32 @@ export function ImpactPredictor({
       <CardContent className="py-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-[var(--accent-primary)]" />
+            {predictionSource === 'signal' ? (
+              <SignalIcon className="h-4 w-4" color="var(--brand-primary)" />
+            ) : (
+              <Sparkles className="h-4 w-4 text-[var(--brand-secondary)]" />
+            )}
             <span className="text-sm font-medium text-[var(--text-primary)]">
               Predicted Impact
             </span>
             <Badge className={cn('text-xs', confidenceLevel.bg, confidenceLevel.color)}>
               {confidenceLevel.label}
             </Badge>
+            {predictionSource === 'signal' && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="text-[10px] text-[var(--brand-primary)] border-[var(--brand-primary)]/30">
+                      <SignalIcon className="h-2.5 w-2.5 mr-0.5" color="var(--brand-primary)" />
+                      ML
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Prediction from Signal AI using historical data and competitor analysis
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
           <Button
             variant="ghost"

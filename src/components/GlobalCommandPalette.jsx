@@ -135,6 +135,9 @@ export default function GlobalCommandPalette({ open, onOpenChange, onNavigate })
           })}
         </CommandGroup>
       </CommandList>
+      <div className="border-t px-3 py-2 text-center text-xs text-muted-foreground">
+        Press {modKey}K from anywhere to open search
+      </div>
     </CommandDialog>
   )
 }

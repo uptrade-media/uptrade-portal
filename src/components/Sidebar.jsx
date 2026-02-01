@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -48,15 +48,13 @@ import {
   PanelLeft,
   PanelLeftClose,
   Columns2,
-  Link2
+  Link2,
+  Globe2
 } from 'lucide-react'
 import useAuthStore, { useOrgFeatures } from '@/lib/auth-store'
-import useReportsStore from '@/lib/reports-store'
-import useMessagesStore from '@/lib/messages-store'
-import useBillingStore from '@/lib/billing-store'
-import useNotificationStore from '@/lib/notification-store'
-import { useProposalsStore } from '@/lib/proposals-store'
+import { useOverdueInvoices, useProposals, useNewLeadsCount, useAllAudits, useUnreadMessagesCount } from '@/lib/hooks'
 import { useBrandColors } from '@/hooks/useBrandColors'
+import { getStaggerListVariants } from '@/lib/animation-variants'
 
 // Custom Signal icon based on signalicon.svg design - uses currentColor like lucide icons
 const SignalIcon = ({ className }) => (
@@ -112,16 +110,21 @@ const Sidebar = ({
   // - 'collapsed': always collapsed  
   // - 'hover': expanded when hovered
   const isExpanded = sidebarMode === 'expanded' || (sidebarMode === 'hover' && isHovered)
+  const reducedMotion = useReducedMotion()
+  const staggerVariants = getStaggerListVariants(!!reducedMotion)
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout, isSuperAdmin, currentOrg, currentProject, accessLevel } = useAuthStore()
   const { hasFeatureRaw } = useOrgFeatures()
   const { primary: brandPrimary, rgba } = useBrandColors()
-  const { getUnreadAuditsCount } = useReportsStore()
-  const { unreadCount: unreadMessages, fetchUnreadCount: fetchUnreadMessages } = useMessagesStore()
-  const { invoices } = useBillingStore()
-  const { newLeadsCount, fetchNewLeadsCount } = useNotificationStore()
-  const { proposals, fetchProposals } = useProposalsStore()
+  const { data: audits = [] } = useAllAudits()
+  const { data: unreadMessages = 0 } = useUnreadMessagesCount()
+  const { data: invoicesData } = useOverdueInvoices(currentOrg?.id)
+  const invoices = invoicesData?.invoices || []
+  const { data: newLeadsData } = useNewLeadsCount({ enabled: user?.role === 'admin' })
+  const newLeadsCount = newLeadsData?.count || 0
+  const { data: proposalsData } = useProposals()
+  const proposals = proposalsData?.proposals || []
   
   // Check user roles - super admins get full access to everything
   const isAdmin = user?.role === 'admin' || isSuperAdmin
@@ -152,7 +155,7 @@ const Sidebar = ({
   // Feature check helper - for admin portal, show unless explicitly disabled
   const hasFeature = (featureKey) => {
     const rawValue = hasFeatureRaw(featureKey)
-    const adminTools = ['seo', 'ecommerce', 'commerce', 'blog', 'portfolio', 'email', 'email_manager', 'outreach', 'team', 'team_metrics', 'forms', 'engage', 'signal', 'prospecting', 'reputation', 'analytics']
+    const adminTools = ['seo', 'ecommerce', 'commerce', 'blog', 'portfolio', 'email', 'email_manager', 'outreach', 'forms', 'engage', 'signal', 'prospecting', 'reputation', 'analytics']
     
     // For agency admins, show admin tools unless explicitly disabled
     if (isAdmin && (isAgencyOrg || !currentOrg) && adminTools.includes(featureKey)) {
@@ -163,19 +166,10 @@ const Sidebar = ({
     return rawValue === true
   }
 
-  // Fetch notification counts on mount
-  useEffect(() => {
-    fetchUnreadMessages()
-    if (user?.role === 'admin') {
-      fetchNewLeadsCount()
-    }
-    // Fetch proposals for notification count (for Uptrade clients)
-    if (hasOrgLevelAccess) {
-      fetchProposals()
-    }
-  }, [user, hasOrgLevelAccess])
-
-  const unreadAudits = getUnreadAuditsCount()
+  // Calculate unread audits
+  const unreadAudits = audits.filter(audit => 
+    audit.status === 'completed' && !audit.viewedAt
+  ).length
   
   // Calculate unpaid invoices count (pending or overdue)
   const unpaidInvoicesCount = invoices.filter(inv => 
@@ -223,8 +217,6 @@ const Sidebar = ({
     allNavigationItems = [
       { id: 'dashboard', label: 'Dashboard', icon: Home },
       { id: 'crm', label: 'CRM', icon: Users, badge: newLeadsCount > 0 ? newLeadsCount.toString() : null },
-      ...(hasFeature('team') ? [{ id: 'team', label: 'Team', icon: Shield }] : []),
-      ...(hasFeature('team_metrics') ? [{ id: 'team-metrics', label: 'Team Metrics', icon: Trophy }] : []),
     ]
   }
   // --- AGENCY ADMIN VIEW (Uptrade Media org = admin portal) ---
@@ -242,6 +234,7 @@ const Sidebar = ({
     
     // Feature-gated admin tools (show unless explicitly disabled)
     if (hasFeature('seo')) allNavigationItems.push({ id: 'seo', label: 'SEO', icon: Search })
+    if (hasFeature('seo')) allNavigationItems.push({ id: 'website', label: 'Website', icon: Globe2 })
     // Commerce is an admin tool - contains Proposals (Contracts) and Invoices for Uptrade
     allNavigationItems.push({ id: 'commerce', label: 'Commerce', icon: Box })
     if (hasFeature('engage')) allNavigationItems.push({ id: 'engage', label: 'Engage', icon: Zap })
@@ -252,13 +245,11 @@ const Sidebar = ({
     // Affiliates - affiliate tracking
     if (hasFeature('affiliates')) allNavigationItems.push({ id: 'affiliates', label: 'Affiliates', icon: Link2 })
     if (hasFeature('signal')) allNavigationItems.push({ id: 'signal', label: 'Signal AI', icon: SignalIcon })
-    if (hasFeature('team')) allNavigationItems.push({ id: 'team', label: 'Team', icon: Shield })
-    if (hasFeature('team_metrics')) allNavigationItems.push({ id: 'team-metrics', label: 'Team Metrics', icon: Trophy })
     if (hasFeature('forms')) allNavigationItems.push({ id: 'forms', label: 'Forms', icon: ClipboardList })
     if (hasFeature('blog')) allNavigationItems.push({ id: 'blog', label: 'Blog', icon: BookOpen })
     if (hasFeature('portfolio')) allNavigationItems.push({ id: 'portfolio', label: 'Portfolio', icon: Briefcase })
     if (hasFeature('outreach') || hasFeature('email') || hasFeature('email_manager')) {
-      allNavigationItems.push({ id: 'email', label: 'Outreach', icon: Mail })
+      allNavigationItems.push({ id: 'outreach', label: 'Outreach', icon: Mail })
     }
     if (hasFeature('analytics')) allNavigationItems.push({ id: 'analytics', label: 'Analytics', icon: BarChart3 })
   }
@@ -309,11 +300,12 @@ const Sidebar = ({
       allNavigationItems.push({ id: 'crm', label: 'CRM', icon: Users })
       if (projectHasFeature('forms')) allNavigationItems.push({ id: 'forms', label: 'Forms', icon: ClipboardList })
       if (projectHasFeature('outreach') || projectHasFeature('email') || projectHasFeature('email_manager')) {
-        allNavigationItems.push({ id: 'email', label: 'Outreach', icon: Mail })
+        allNavigationItems.push({ id: 'outreach', label: 'Outreach', icon: Mail })
       }
       if (projectHasFeature('engage')) allNavigationItems.push({ id: 'engage', label: 'Engage', icon: Zap })
       if (projectHasFeature('blog')) allNavigationItems.push({ id: 'blog', label: 'Blog', icon: BookOpen })
       if (projectHasFeature('seo')) allNavigationItems.push({ id: 'seo', label: 'SEO', icon: Search })
+      if (projectHasFeature('seo')) allNavigationItems.push({ id: 'website', label: 'Website', icon: Globe2 })
       if (projectHasFeature('reputation')) allNavigationItems.push({ id: 'reputation', label: 'Reputation', icon: Star })
       if (projectHasFeature('broadcast')) allNavigationItems.push({ id: 'broadcast', label: 'Broadcast', icon: Radio })
       if (projectHasFeature('affiliates')) allNavigationItems.push({ id: 'affiliates', label: 'Affiliates', icon: Link2 })
@@ -390,6 +382,7 @@ const Sidebar = ({
                 size="sm"
                 onClick={toggleCollapse}
                 className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
               >
                 {!isExpanded ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
               </Button>
@@ -430,56 +423,68 @@ const Sidebar = ({
 
       {/* Navigation - Scrollable */}
       <nav className="flex-1 min-h-0 py-2 space-y-0.5 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-        {allNavigationItems.map((item) => {
-          // Handle divider items (tenant module separator)
-          if (item.isDivider) {
-            if (!isExpanded) {
+        <motion.div
+          className="flex flex-col"
+          variants={staggerVariants.container}
+          initial="hidden"
+          animate="visible"
+        >
+          {allNavigationItems.map((item) => {
+            // Handle divider items (tenant module separator)
+            if (item.isDivider) {
+              if (!isExpanded) {
+                return (
+                  <motion.div key={item.id} variants={staggerVariants.item}>
+                    <div className="py-2">
+                      <Separator className="bg-border" />
+                    </div>
+                  </motion.div>
+                )
+              }
               return (
-                <div key={item.id} className="py-2">
-                  <Separator className="bg-border" />
-                </div>
+                <motion.div key={item.id} variants={staggerVariants.item}>
+                  <div className={item.label ? "pt-4 pb-2" : "py-3"}>
+                    <Separator className="bg-border/50" />
+                    {item.label && (
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-3 block mt-2">
+                        {item.label}
+                      </span>
+                    )}
+                  </div>
+                </motion.div>
               )
             }
-            return (
-              <div key={item.id} className={item.label ? "pt-4 pb-2" : "py-3"}>
-                <Separator className="bg-border/50" />
-                {item.label && (
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-3 block mt-2">
-                    {item.label}
-                  </span>
-                )}
-              </div>
-            )
-          }
           
-          // Handle collapsible sections (Uptrade Media dropdown)
-          if (item.isCollapsibleSection) {
+            // Handle collapsible sections (Uptrade Media dropdown)
+            if (item.isCollapsibleSection) {
             const SectionIcon = item.icon
             const hasActiveChild = item.items?.some(child => activeSection === child.id)
             
             // In collapsed mode, just show the icon
             if (!isExpanded) {
               return (
-                <div key={item.id} className="py-2">
-                  <Separator className="bg-border/50" />
-                  {item.badge && (
-                    <div className="flex justify-center mt-1">
-                      <Badge 
-                        variant="default" 
-                        className="border-0 text-[10px] px-1.5"
-                        style={{ backgroundColor: brandPrimary, color: 'white' }}
-                      >
-                        {item.badge}
-                      </Badge>
-                    </div>
-                  )}
-                </div>
+                <motion.div key={item.id} variants={staggerVariants.item}>
+                  <div className="py-2">
+                    <Separator className="bg-border/50" />
+                    {item.badge && (
+                      <div className="flex justify-center mt-1">
+                        <Badge 
+                          variant="default" 
+                          className="border-0 text-[10px] px-1.5"
+                          style={{ backgroundColor: brandPrimary, color: 'white' }}
+                        >
+                          {item.badge}
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
               )
             }
             
             return (
+              <motion.div key={item.id} variants={staggerVariants.item}>
               <Collapsible
-                key={item.id}
                 open={uptradeDropdownOpen}
                 onOpenChange={setUptradeDropdownOpen}
                 className="py-3"
@@ -539,6 +544,7 @@ const Sidebar = ({
                   })}
                 </CollapsibleContent>
               </Collapsible>
+              </motion.div>
             )
           }
           
@@ -546,10 +552,10 @@ const Sidebar = ({
           const isActive = activeSection === item.id
           
           return (
+            <motion.div key={item.id} variants={staggerVariants.item}>
             <Button
-              key={item.id}
               variant={isActive ? "secondary" : "ghost"}
-              className={`w-full h-10 justify-start px-0 ${
+              className={`w-full h-10 min-h-[44px] justify-start px-0 ${
                 isActive 
                   ? '' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -559,6 +565,7 @@ const Sidebar = ({
                 color: brandPrimary,
               } : {}}
               onClick={() => handleNavigation(item)}
+              aria-label={item.label || item.id}
             >
               {/* Icon container - fixed 56px width to keep icons in place */}
               <span className="flex items-center justify-center w-14 flex-shrink-0">
@@ -584,12 +591,14 @@ const Sidebar = ({
                 </>
               )}
             </Button>
+            </motion.div>
           )
         })}
+        </motion.div>
       </nav>
 
-      {/* Organization Settings - only for org-level users in client orgs */}
-      {hasOrgLevelAccess && isClientOrg && (
+      {/* Organization Settings - org-level users in client orgs, or agency (to manage our team) */}
+      {hasOrgLevelAccess && currentOrg && (isClientOrg || isAgencyOrg) && (
         <div className="py-2 border-t border-border/50">
           <Button
             variant="ghost"
@@ -599,11 +608,12 @@ const Sidebar = ({
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
             }`}
             onClick={() => navigate('/organization')}
+            aria-label="Organization settings"
           >
             <span className="flex items-center justify-center w-14 flex-shrink-0">
               <Settings className="h-[18px] w-[18px]" />
             </span>
-            {isExpanded && <span className="text-sm pr-3">Organization</span>}
+            {isExpanded && <span className="text-sm pr-3">{isAgencyOrg ? 'Our team' : 'Organization'}</span>}
           </Button>
         </div>
       )}
@@ -615,6 +625,7 @@ const Sidebar = ({
             <Button
               variant="ghost"
               className="w-full h-10 justify-start px-0 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              aria-label="Sidebar control"
             >
               <span className="flex items-center justify-center w-14 flex-shrink-0">
                 <PanelLeft className="h-[18px] w-[18px]" />
@@ -662,7 +673,7 @@ const Sidebar = ({
         width: isExpanded ? 240 : 56,
       }}
       transition={{ 
-        duration: 0.15, 
+        duration: reducedMotion ? 0 : 0.15, 
         ease: [0.25, 0.1, 0.25, 1.0] 
       }}
       onMouseEnter={() => sidebarMode === 'hover' && handleHoverChange(true)}

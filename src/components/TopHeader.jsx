@@ -41,8 +41,10 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import ContactAvatar from '@/components/ui/ContactAvatar'
+import AccountSettingsModal from '@/components/settings/AccountSettingsModal'
 import useAuthStore from '@/lib/auth-store'
 import useThemeStore from '@/lib/theme-store'
+import { useAccountSettingsStore } from '@/lib/account-settings-store'
 import { cn } from '@/lib/utils'
 
 // Detect if user is on Windows
@@ -96,6 +98,7 @@ function OrgSwitcherDropdown() {
         onClick={handleOrgClick}
         className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-muted/50 transition-colors"
         disabled={isLoading}
+        aria-label="Go to organization dashboard"
       >
         <span className="text-sm max-w-[150px] truncate">{currentOrg?.name || 'Select Org'}</span>
         {isSuperAdmin && (
@@ -111,6 +114,7 @@ function OrgSwitcherDropdown() {
           <button 
             className="flex items-center justify-center w-6 h-6 rounded hover:bg-muted/50 transition-colors border border-border/50"
             disabled={isLoading}
+            aria-label="Switch organization"
           >
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
@@ -187,6 +191,7 @@ function ProjectSwitcherDropdown({ onNavigateToProjects }) {
         <button 
           className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/50 transition-colors"
           disabled={isLoading}
+          aria-label="Switch project"
         >
           <span className="text-sm max-w-[150px] truncate">{currentProject?.name || currentProject?.title || 'Project'}</span>
           {currentProject && getEnvironmentBadge(currentProject) && (
@@ -227,7 +232,7 @@ function ProjectSwitcherDropdown({ onNavigateToProjects }) {
 // ============================================================================
 // USER MENU DROPDOWN
 // ============================================================================
-function UserMenuDropdown({ onNavigate }) {
+function UserMenuDropdown({ onNavigate, onOpenSearch }) {
   const { user, logout } = useAuthStore()
   const { theme, setTheme } = useThemeStore()
 
@@ -244,7 +249,7 @@ function UserMenuDropdown({ onNavigate }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="flex items-center justify-center w-8 h-8 rounded-full overflow-hidden hover:ring-2 hover:ring-primary/20 transition-all">
+        <button className="flex items-center justify-center w-8 h-8 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 rounded-full overflow-hidden hover:ring-2 hover:ring-primary/20 transition-all" aria-label="User menu">
           <ContactAvatar 
             contact={user}
             size="sm"
@@ -259,9 +264,16 @@ function UserMenuDropdown({ onNavigate }) {
           <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
         </div>
 
-        <DropdownMenuItem onClick={() => onNavigate?.('settings')}>
+        {onOpenSearch && (
+          <DropdownMenuItem onClick={onOpenSearch}>
+            <Search className="h-4 w-4 mr-2" />
+            Quick search ({modKey}K)
+          </DropdownMenuItem>
+        )}
+
+        <DropdownMenuItem onClick={() => useAccountSettingsStore.getState().openModal()}>
           <Settings className="h-4 w-4 mr-2" />
-          Account preferences
+          Account Settings
         </DropdownMenuItem>
         
         <DropdownMenuItem>
@@ -319,7 +331,7 @@ function ProjectSection({ onNavigateToProjects }) {
 export default function TopHeader({ onNavigate, onOpenSearch }) {
   return (
     <TooltipProvider>
-      <header className="h-12 flex items-center justify-between border-b border-border/50 bg-card/80 backdrop-blur-sm">
+      <header className="h-12 flex items-center justify-between border-b border-border/50 bg-card backdrop-blur-sm" role="banner" aria-label="Top navigation">
         {/* Left section: Logo + Org + Project */}
         <div className="flex items-center">
           {/* Uptrade Logo - aligned with sidebar icons (56px = w-14) */}
@@ -351,6 +363,7 @@ export default function TopHeader({ onNavigate, onOpenSearch }) {
                 size="sm" 
                 className="gap-2 text-muted-foreground hover:text-foreground min-w-[200px]"
                 onClick={onOpenSearch}
+                aria-label="Open search (Command+K)"
               >
                 <Search className="h-4 w-4" />
                 <span className="hidden sm:inline flex-1 text-left">Search...</span>
@@ -365,7 +378,7 @@ export default function TopHeader({ onNavigate, onOpenSearch }) {
           {/* Help Button */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+              <Button variant="ghost" size="icon" className="h-8 w-8 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 text-muted-foreground hover:text-foreground" aria-label="Help and support">
                 <HelpCircle className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
@@ -373,9 +386,10 @@ export default function TopHeader({ onNavigate, onOpenSearch }) {
           </Tooltip>
 
           {/* User Menu */}
-          <UserMenuDropdown onNavigate={onNavigate} />
+          <UserMenuDropdown onNavigate={onNavigate} onOpenSearch={onOpenSearch} />
         </div>
       </header>
+      <AccountSettingsModal />
     </TooltipProvider>
   )
 }

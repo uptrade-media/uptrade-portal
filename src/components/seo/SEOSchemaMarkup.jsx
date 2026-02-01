@@ -1,7 +1,9 @@
 // src/components/seo/SEOSchemaMarkup.jsx
-// Schema Markup Generator - create and validate structured data
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// Schema Markup overview - page-based stats; generate schema per page in Page Detail
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { useSeoSchemas, useSeoPages, useCreateSeoSchema, seoTechnicalKeys } from '@/hooks/seo'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSignalAccess } from '@/lib/signal-access'
 import SignalUpgradeCard from './signal/SignalUpgradeCard'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,6 +23,7 @@ import {
 } from 'lucide-react'
 
 export default function SEOSchemaMarkup({ projectId }) {
+  const queryClient = useQueryClient()
   const { hasAccess: hasSignalAccess } = useSignalAccess()
 
   // Show upgrade prompt if no Signal access
@@ -32,35 +35,38 @@ export default function SEOSchemaMarkup({ projectId }) {
     )
   }
 
-  const { 
-    schemaStatus, 
-    schemaLoading,
-    generatedSchema,
-    fetchSchemaStatus,
-    generateSchema,
-    pages
-  } = useSeoStore()
+  // React Query hooks - summary comes from GET /schemas/summary (page-based stats)
+  const { data: schemaData, isLoading: schemaLoading } = useSeoSchemas(projectId)
+  const { data: pagesData } = useSeoPages(projectId)
+  const createSchemaMutation = useCreateSeoSchema()
   
-  const [isGenerating, setIsGenerating] = useState(false)
+  // API returns summary directly: totalPages, pagesWithSchema, coveragePercent, schemaTypeCounts, etc.
+  const schemaStatus = schemaData || {}
+  const generatedSchema = schemaData?.generatedSchema
+  const pages = pagesData?.pages || pagesData?.data || []
+  
   const [selectedPage, setSelectedPage] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
 
-  useEffect(() => {
-    if (projectId) {
-      fetchSchemaStatus(projectId)
-    }
-  }, [projectId])
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: seoTechnicalKeys.schemas(projectId) })
+  }
 
-  const handleGenerateSchema = async (pageId) => {
-    setIsGenerating(true)
-    setSelectedPage(pageId)
+  const handleGenerateSchema = async (page, schemaType = 'auto') => {
+    setSelectedPage(page.id)
     try {
-      await generateSchema(projectId, pageId)
+      await createSchemaMutation.mutateAsync({ 
+        projectId, 
+        pageId: page.id, 
+        data: { url: page.url, schemaType } 
+      })
     } catch (error) {
       console.error('Schema generation error:', error)
     }
-    setIsGenerating(false)
   }
+  
+  // Use mutation loading state
+  const isGenerating = createSchemaMutation.isLoading
 
   const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text)
@@ -77,11 +83,11 @@ export default function SEOSchemaMarkup({ projectId }) {
         <div>
           <h2 className="text-2xl font-bold">Schema Markup</h2>
           <p className="text-muted-foreground">
-            Generate and manage structured data for rich results
+            Page-based structured data coverage. Generate schema for each page in <strong>Pages → Page Detail</strong>.
           </p>
         </div>
         <Button 
-          onClick={() => fetchSchemaStatus(projectId)} 
+          onClick={handleRefresh} 
           disabled={schemaLoading}
           variant="outline"
         >
@@ -102,7 +108,7 @@ export default function SEOSchemaMarkup({ projectId }) {
                 </div>
                 <Progress value={status.coveragePercent || 0} className="h-2" />
                 <p className="text-sm text-muted-foreground mt-2">
-                  {status.pagesWithSchema || 0} of {status.totalPages || 0} pages have schema
+                  {status.pagesWithSchema ?? 0} of {status.totalPages ?? 0} pages have schema
                 </p>
               </CardContent>
             </Card>
@@ -129,14 +135,14 @@ export default function SEOSchemaMarkup({ projectId }) {
           </div>
 
           {/* Schema Types Distribution */}
-          {status.schemaTypeCounts && Object.keys(status.schemaTypeCounts).length > 0 && (
+          {(status.schemaTypeCounts || status.byType) && Object.keys(status.schemaTypeCounts || status.byType || {}).length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle>Schema Types in Use</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
-                  {Object.entries(status.schemaTypeCounts).map(([type, count]) => (
+                  {Object.entries(status.schemaTypeCounts || status.byType || {}).map(([type, count]) => (
                     <Badge key={type} variant="outline" className="text-sm py-1 px-3">
                       <Code className="h-3 w-3 mr-1" />
                       {type}: {count}
@@ -181,7 +187,7 @@ export default function SEOSchemaMarkup({ projectId }) {
                         </span>
                         <Button
                           size="sm"
-                          onClick={() => handleGenerateSchema(page.id)}
+                          onClick={() => handleGenerateSchema(page)}
                           disabled={isGenerating && selectedPage === page.id}
                         >
                           {isGenerating && selectedPage === page.id ? (
@@ -314,7 +320,7 @@ export default function SEOSchemaMarkup({ projectId }) {
             <p className="text-muted-foreground mb-4">
               Check your site's structured data coverage and generate new schema
             </p>
-            <Button onClick={() => fetchSchemaStatus(projectId)}>
+            <Button onClick={handleRefresh}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Check Coverage
             </Button>

@@ -1,5 +1,6 @@
 // src/components/affiliates/CreateOfferDialog.jsx
 // Dialog to create a new offer for an affiliate
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState } from 'react'
 import { Plus, Link2, Loader2 } from 'lucide-react'
@@ -24,12 +25,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import useAuthStore from '@/lib/auth-store'
-import useAffiliatesStore from '@/lib/affiliates-store'
+import { useCreateAffiliateOffer } from '@/lib/hooks'
 import { toast } from 'sonner'
 
 export default function CreateOfferDialog({ affiliateId, children }) {
   const { currentProject } = useAuthStore()
-  const { createOffer } = useAffiliatesStore()
+  const createOfferMutation = useCreateAffiliateOffer()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -62,10 +63,13 @@ export default function CreateOfferDialog({ affiliateId, children }) {
 
     setIsSubmitting(true)
     try {
-      await createOffer(currentProject.id, {
-        ...formData,
-        affiliate_id: affiliateId,
-        payout_amount: formData.payout_amount ? parseFloat(formData.payout_amount) : null,
+      await createOfferMutation.mutateAsync({
+        projectId: currentProject.id,
+        data: {
+          ...formData,
+          affiliate_id: affiliateId,
+          payout_amount: formData.payout_amount ? parseFloat(formData.payout_amount) : null,
+        }
       })
       toast.success('Offer created')
       setOpen(false)

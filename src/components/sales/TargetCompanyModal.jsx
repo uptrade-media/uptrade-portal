@@ -54,7 +54,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
-import useCrmStore from '@/lib/crm-store'
+import { 
+  useClaimTargetCompany, 
+  useUnclaimTargetCompany 
+} from '@/lib/hooks'
 import { toast } from 'sonner'
 
 // Score configuration
@@ -352,12 +355,10 @@ export default function TargetCompanyModal({ company, open, onClose }) {
   const [copiedField, setCopiedField] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
   
-  const { 
-    claimTargetCompany, 
-    unclaimTargetCompany, 
-    getCallPrep, 
-    callPrepLoading 
-  } = useCrmStore()
+  // Mutations
+  const claimMutation = useClaimTargetCompany()
+  const unclaimMutation = useUnclaimTargetCompany()
+  const callPrepLoading = false // TODO: Add when getCallPrep hook is ready
 
   const scoreConfig = useMemo(() => getScoreConfig(company?.score || 0), [company?.score])
   
@@ -375,7 +376,7 @@ export default function TargetCompanyModal({ company, open, onClose }) {
 
   const handleClaim = async () => {
     try {
-      await claimTargetCompany(company.id)
+      await claimMutation.mutateAsync({ id: company.id })
       toast.success('Company claimed!')
     } catch (err) {
       toast.error('Failed to claim company')
@@ -384,7 +385,7 @@ export default function TargetCompanyModal({ company, open, onClose }) {
 
   const handleUnclaim = async () => {
     try {
-      await unclaimTargetCompany(company.id)
+      await unclaimMutation.mutateAsync({ id: company.id })
       toast.success('Company unclaimed')
     } catch (err) {
       toast.error('Failed to unclaim company')
@@ -393,8 +394,8 @@ export default function TargetCompanyModal({ company, open, onClose }) {
 
   const handleGenerateCallPrep = async () => {
     try {
-      await getCallPrep(company.id, true)
-      toast.success('Call prep generated!')
+      // TODO: Add getCallPrep hook when CRM is fully migrated
+      toast.info('Call prep generation coming soon')
     } catch (err) {
       toast.error('Failed to generate call prep')
     }

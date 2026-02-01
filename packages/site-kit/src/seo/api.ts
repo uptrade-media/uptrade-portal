@@ -1,14 +1,30 @@
 /**
  * @uptrade/site-kit/seo - API Functions
  * 
- * All SEO data fetching goes through Portal API with API key auth.
- * These functions are designed for server-side use (RSC/SSR).
+ * ⚠️ DEPRECATED: This file exposes API keys in client bundles.
+ * Use `server-api.ts` instead for server-side operations.
+ * 
+ * This file is kept for backward compatibility but will be removed in a future version.
+ * 
+ * Migration guide:
+ * - Replace: import { getSEOPageData } from '@uptrade/seo/api'
+ * - With: import { getSEOPageData } from '@uptrade/seo/server'
+ * - Use private env vars: UPTRADE_API_KEY instead of NEXT_PUBLIC_UPTRADE_API_KEY
  */
 
 import { cache } from 'react'
 
+// Show deprecation warning in development
+if (process.env.NODE_ENV === 'development') {
+  console.warn(
+    '@uptrade/seo: WARNING - You are using the deprecated api.ts which exposes API keys. ' +
+    'Please migrate to server-api.ts for better security. ' +
+    'See: packages/site-kit/src/seo/README.md#migration'
+  )
+}
+
 // ============================================
-// API Config
+// API Config (DEPRECATED)
 // ============================================
 
 function getApiConfig() {
@@ -242,3 +258,145 @@ export async function registerSitemap(
     return { success: false, created: 0, updated: 0 }
   }
 }
+
+// ============================================
+// AI Visibility & Entity Graph API
+// ============================================
+
+/**
+ * Get Signal API config for AI visibility features
+ */
+function getSignalApiConfig() {
+  const apiUrl = process.env.NEXT_PUBLIC_SIGNAL_API_URL || 'https://signal.uptrademedia.com'
+  const apiKey = process.env.NEXT_PUBLIC_UPTRADE_API_KEY || ''
+  return { apiUrl, apiKey }
+}
+
+async function signalApiGet<T>(endpoint: string): Promise<T | null> {
+  const { apiUrl, apiKey } = getSignalApiConfig()
+  
+  if (!apiKey) {
+    return null
+  }
+  
+  try {
+    const response = await fetch(`${apiUrl}${endpoint}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      next: { revalidate: 300 }, // Cache for 5 minutes
+    })
+    
+    if (!response.ok) {
+      return null
+    }
+    
+    const result = await response.json()
+    return result?.data || result
+  } catch (error) {
+    console.error('@uptrade/seo: Signal API error:', error)
+    return null
+  }
+}
+
+/**
+ * Entity types for the knowledge graph
+ */
+export type EntityType = 
+  | 'organization'
+  | 'person'
+  | 'service'
+  | 'product'
+  | 'location'
+  | 'concept'
+  | 'credential'
+
+/**
+ * Entity from the knowledge graph
+ */
+export interface SEOEntity {
+  id: string
+  project_id: string
+  entity_type: EntityType
+  name: string
+  slug: string
+  properties: Record<string, unknown>
+  knows_about: string[]
+  same_as: string[]
+  schema_type?: string
+  is_primary: boolean
+}
+
+/**
+ * Fetch entities for a project - cached per request
+ * Returns the entity graph for enhanced schema markup
+ */
+export const getEntities = cache(async (
+  projectId: string,
+  options?: { type?: EntityType }
+): Promise<SEOEntity[]> => {
+  let endpoint = `/skills/seo/entities/${projectId}`
+  if (options?.type) {
+    endpoint += `?type=${options.type}`
+  }
+  const result = await signalApiGet<SEOEntity[]>(endpoint)
+  return result || []
+})
+
+/**
+ * Fetch primary entity (the business) - cached per request
+ */
+export const getPrimaryEntity = cache(async (
+  projectId: string
+): Promise<SEOEntity | null> => {
+  return signalApiGet<SEOEntity>(`/skills/seo/entities/${projectId}/primary`)
+})
+
+/**
+ * Fetch entity-enhanced schema for a page
+ * Returns Organization schema with knowsAbout, areaServed, employee, etc.
+ */
+export const getEntityEnhancedSchema = cache(async (
+  projectId: string,
+  pagePath: string
+): Promise<object[]> => {
+  const result = await signalApiGet<{ schemas: object[] }>(
+    `/skills/seo/schema/${projectId}/entity-enhanced?pagePath=${encodeURIComponent(pagePath)}`
+  )
+  return result?.schemas || []
+})
+
+/**
+ * Get AI visibility score for a page
+ */
+export const getVisibilityScore = cache(async (
+  projectId: string,
+  pagePath: string
+): Promise<{
+  overall_score: number
+  entity_coverage: number
+  answer_density: number
+  chunk_readability: number
+  authority_signals: number
+  schema_completeness: number
+} | null> => {
+  const result = await signalApiGet<any[]>(`/skills/seo/visibility/${projectId}`)
+  if (!result) return null
+  return result.find(s => s.page_path === pagePath) || null
+})
+
+/**
+ * Get AI visibility summary for project
+ */
+export const getVisibilitySummary = cache(async (
+  projectId: string
+): Promise<{
+  overall_score: number
+  total_entities: number
+  pages_analyzed: number
+  top_recommendations: Array<{ priority: string; type: string; message: string }>
+} | null> => {
+  return signalApiGet(`/skills/seo/visibility/${projectId}/summary`)
+})

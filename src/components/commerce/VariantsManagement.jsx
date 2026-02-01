@@ -1,8 +1,10 @@
 // src/components/commerce/VariantsManagement.jsx
 // Full CRUD dialog for managing product variants
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect } from 'react'
-import { useCommerceStore, getVariants, createVariant, updateVariant, deleteVariant } from '@/lib/commerce-store'
+import { useCommerceVariants, useCreateCommerceVariant, useUpdateCommerceVariant, useDeleteCommerceVariant, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,

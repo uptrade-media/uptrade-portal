@@ -30,7 +30,6 @@ import {
   XCircle,
   MoreHorizontal,
   Brain,
-  Loader2,
   Plus,
   Link2,
   User,
@@ -49,6 +48,7 @@ import {
   Shield,
   Search
 } from 'lucide-react'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -87,7 +87,7 @@ import { Label } from '@/components/ui/label'
 import { toast } from '@/lib/toast'
 import { useBrandColors } from '@/hooks/useBrandColors'
 import { crmApi, syncApi, auditsApi, emailApi } from '@/lib/portal-api'
-import { PIPELINE_STAGES } from '../crm/PipelineKanban'
+import { PIPELINE_STAGES } from '../crm/pipelineStages'
 import useAuthStore from '@/lib/auth-store'
 import EmailComposeDialog from '../crm/EmailComposeDialog'
 import { GmailConnectCompact } from '../email/GmailConnectCard'
@@ -256,7 +256,7 @@ function ScheduleMeetingModal({ open, onClose, prospect, brandColors }) {
 
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin" style={{ color: brandColors.primary }} />
+            <UptradeSpinner size="md" className="[&_p]:hidden" />
           </div>
         ) : (
           <div className="space-y-4 py-2">
@@ -477,7 +477,7 @@ function ScheduleMeetingModal({ open, onClose, prospect, brandColors }) {
                   >
                     {isBooking ? (
                       <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
                         Booking...
                       </>
                     ) : (
@@ -521,7 +521,7 @@ function ProposalsList({ prospectId, brandColors }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-4">
-        <Loader2 className="h-5 w-5 animate-spin" style={{ color: brandColors.secondary }} />
+        <UptradeSpinner size="sm" className="[&_p]:hidden [&_svg]:text-[var(--brand-secondary)]" />
       </div>
     )
   }
@@ -609,11 +609,11 @@ function ProposalsList({ prospectId, brandColors }) {
 }
 
 // Overview Tab
-function OverviewTab({ prospect, brandColors, onStageChange, onConvert, isConverting, isAgency, onUpdate, onTabChange, isModalMode }) {
+function OverviewTab({ prospect, brandColors, onStageChange, onConvert, isConverting, isAgency, onUpdate, onTabChange, isModalMode, pipelineStages = PIPELINE_STAGES }) {
   const [customFields, setCustomFields] = useState([])
   const [isLoadingFields, setIsLoadingFields] = useState(true)
   
-  const stageConfig = PIPELINE_STAGES[prospect.pipeline_stage || 'new_lead']
+  const stageConfig = pipelineStages[prospect.pipeline_stage || 'new_lead']
   const StageIcon = stageConfig?.icon || Sparkles
 
   useEffect(() => {
@@ -820,7 +820,7 @@ function OverviewTab({ prospect, brandColors, onStageChange, onConvert, isConver
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(PIPELINE_STAGES).map(([key, config]) => {
+              {Object.entries(pipelineStages).map(([key, config]) => {
                 const Icon = config.icon
                 return (
                   <SelectItem key={key} value={key}>
@@ -1022,7 +1022,7 @@ function OverviewTab({ prospect, brandColors, onStageChange, onConvert, isConver
           <CardContent className="space-y-4">
             {isLoadingFields ? (
               <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <UptradeSpinner size="sm" className="[&_p]:hidden [&_svg]:text-muted-foreground" />
               </div>
             ) : (
               customFields.map((field) => (
@@ -1072,7 +1072,7 @@ function OverviewTab({ prospect, brandColors, onStageChange, onConvert, isConver
                   </>
                 ) : isConverting ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
                     Converting...
                   </>
                 ) : (
@@ -1125,7 +1125,7 @@ function FormResponseTab({ prospect, brandColors }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <Loader2 className="h-6 w-6 animate-spin" style={{ color: brandColors.primary }} />
+        <UptradeSpinner size="md" className="[&_p]:hidden" />
       </div>
     )
   }
@@ -1251,7 +1251,7 @@ function TimelineTab({ prospect, brandColors, isAgency }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <Loader2 className="h-6 w-6 animate-spin" style={{ color: brandColors.primary }} />
+        <UptradeSpinner size="md" className="[&_p]:hidden" />
       </div>
     )
   }
@@ -1420,7 +1420,7 @@ function AuditsTab({ prospect, brandColors }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <Loader2 className="h-6 w-6 animate-spin" style={{ color: brandColors.primary }} />
+        <UptradeSpinner size="md" className="[&_p]:hidden" />
       </div>
     )
   }
@@ -1517,7 +1517,7 @@ function AuditsTab({ prospect, brandColors }) {
               {/* Processing state */}
               {!isComplete && (
                 <div className="flex items-center justify-center gap-2 text-sm text-[var(--text-tertiary)]">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <UptradeSpinner size="sm" className="[&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
                   <span>Processing...</span>
                 </div>
               )}
@@ -1577,7 +1577,7 @@ function EmailsTab({ prospect, brandColors, onCompose }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <Loader2 className="h-6 w-6 animate-spin" style={{ color: brandColors.primary }} />
+        <UptradeSpinner size="md" className="[&_p]:hidden" />
       </div>
     )
   }
@@ -1601,7 +1601,7 @@ function EmailsTab({ prospect, brandColors, onCompose }) {
           disabled={connecting}
         >
           {connecting ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
           ) : (
             <Mail className="h-4 w-4 mr-2" />
           )}
@@ -1680,7 +1680,7 @@ function MeetingsTab({ prospect, brandColors, onSchedule }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <Loader2 className="h-6 w-6 animate-spin" style={{ color: brandColors.primary }} />
+        <UptradeSpinner size="md" className="[&_p]:hidden" />
       </div>
     )
   }
@@ -1826,7 +1826,7 @@ function NotesTab({ prospect, brandColors, onUpdate }) {
         >
           {isSaving ? (
             <>
-              <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+              <UptradeSpinner size="sm" className="mr-1.5 [&_p]:hidden [&_svg]:!h-3 [&_svg]:!w-3" />
               Saving...
             </>
           ) : (
@@ -1878,7 +1878,7 @@ function TrackingTab({ prospect, brandColors }) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin" style={{ color: brandColors.primary }} />
+        <UptradeSpinner size="md" className="[&_p]:hidden" />
       </div>
     )
   }
@@ -1973,10 +1973,14 @@ export default function ProspectDetailDrawer({
   onStageChange,
   isAgency = false,
   embedded = false,  // When true, renders inline without fixed positioning
+  pipelineStages: pipelineStagesProp,  // Optional: same config as CRM sidebar/kanban (from Configure pipeline)
+  expanded,
+  onExpand,
 }) {
   const { currentProject } = useAuthStore()
   const { primary: brandPrimary, secondary: brandSecondary, rgba, primaryHover } = useBrandColors()
   const brandColors = { primary: brandPrimary, secondary: brandSecondary, rgba, primaryHover }
+  const pipelineStages = pipelineStagesProp || PIPELINE_STAGES
   
   const [activeTab, setActiveTab] = useState('overview')
   const [isConverting, setIsConverting] = useState(false)
@@ -1984,7 +1988,7 @@ export default function ProspectDetailDrawer({
   const [isModalMode, setIsModalMode] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [showEmailCompose, setShowEmailCompose] = useState(false)
-  const stageConfig = PIPELINE_STAGES[prospect.pipeline_stage || 'new_lead']
+  const stageConfig = pipelineStages[prospect.pipeline_stage || 'new_lead']
   const StageIcon = stageConfig?.icon || Sparkles
 
   // Handle converting prospect to customer (non-agency) or contact (agency)
@@ -2360,6 +2364,7 @@ export default function ProspectDetailDrawer({
                 onUpdate={onUpdate}
                 onTabChange={setActiveTab}
                 isModalMode={isModalMode}
+                pipelineStages={pipelineStages}
               />
             </TabsContent>
             <TabsContent value="form" className="m-0 min-h-full">

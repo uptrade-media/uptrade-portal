@@ -1,4 +1,5 @@
 // src/pages/sync/index.js
-// Barrel export for Sync module page
+// Sync OAuth callback is used by App; main Sync UI is components/sync/SyncModule (MainLayout).
 
-export { default } from './SyncModule'
+export { default as SyncOAuthCallback } from './SyncOAuthCallback'
+export { default } from './SyncOAuthCallback'

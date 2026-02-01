@@ -1,5 +1,5 @@
 // src/pages/broadcast/components/BroadcastSettings.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Plus, 
   RefreshCw, 
@@ -27,7 +27,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { format, formatDistanceToNow } from 'date-fns';
-import { useBroadcastStore } from '@/stores/broadcastStore';
+import { 
+  useBroadcastConnections,
+  useConnectBroadcastPlatform,
+  useDisconnectBroadcastPlatform,
+} from '@/lib/hooks';
 import useAuthStore from '@/lib/auth-store';
 import { PlatformIcon, PlatformBadge } from './PlatformIcon';
 
@@ -317,53 +321,36 @@ export function BroadcastSettings({ open, onOpenChange }) {
   const { currentProject, currentOrg } = useAuthStore();
   const selectedProjectId = currentProject?.id;
   const selectedOrgId = currentOrg?.id;
-  const {
-    connections,
-    fetchConnections,
-    initiateOAuth,
-    refreshConnection,
-    disconnectPlatform,
-  } = useBroadcastStore();
+  
+  const { data: connections = [], isLoading: connectionsLoading } = useBroadcastConnections(selectedProjectId, {
+    enabled: !!selectedProjectId && open,
+  });
+  const connectPlatformMutation = useConnectBroadcastPlatform();
+  const disconnectPlatformMutation = useDisconnectBroadcastPlatform();
 
   const [activeTab, setActiveTab] = useState('connections');
   const [disconnectDialog, setDisconnectDialog] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [credentials, setCredentials] = useState({});
-
-  // Load connections
-  useEffect(() => {
-    if (selectedProjectId && open) {
-      fetchConnections(selectedProjectId);
-    }
-  }, [selectedProjectId, fetchConnections]);
+  
+  const isLoading = connectPlatformMutation.isPending || disconnectPlatformMutation.isPending;
 
   const handleConnect = async (platform) => {
-    setIsLoading(true);
-    try {
-      await initiateOAuth(selectedProjectId, platform);
-    } finally {
-      setIsLoading(false);
-    }
+    // For OAuth, we'd typically redirect to an OAuth flow
+    // This is a placeholder that would initiate the OAuth dance
+    connectPlatformMutation.mutate({ projectId: selectedProjectId, platform, data: {} });
   };
 
   const handleRefresh = async (connection) => {
-    setIsLoading(true);
-    try {
-      await refreshConnection(connection.id);
-    } finally {
-      setIsLoading(false);
-    }
+    // Refresh would re-initiate OAuth or refresh the token
+    connectPlatformMutation.mutate({ projectId: selectedProjectId, platform: connection.platform, data: { refresh: true } });
   };
 
   const handleDisconnect = async () => {
     if (!disconnectDialog) return;
-    setIsLoading(true);
-    try {
-      await disconnectPlatform(disconnectDialog.id);
-      setDisconnectDialog(null);
-    } finally {
-      setIsLoading(false);
-    }
+    disconnectPlatformMutation.mutate(
+      { projectId: selectedProjectId, connectionId: disconnectDialog.id },
+      { onSuccess: () => setDisconnectDialog(null) }
+    );
   };
 
   const handleSaveCredentials = async (platform, creds) => {

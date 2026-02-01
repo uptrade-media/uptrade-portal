@@ -42,10 +42,11 @@ import {
   FileSignature
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useEmailPlatformStore } from '@/lib/email-platform-store'
+import { useEmailPlatformStore } from '@/lib/email-platform-store' // Keep for complex email state
 import { formsApi } from '@/lib/portal-api'
 import useAuthStore from '@/lib/auth-store'
-import { getCommerceSettings } from '@/lib/commerce-store'
+import { useCommerceSettings, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 
 // Trigger type definitions
 const triggerTypes = [

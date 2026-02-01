@@ -2,7 +2,7 @@ import { useParams } from 'react-router-dom'
 import { useEffect, useState, useRef } from 'react'
 import { proposalsApi } from '@/lib/portal-api'
 import UptradeLoading from './UptradeLoading'
-import ProposalTemplate from './ProposalTemplate'
+import ProposalTemplate from './proposals/ProposalTemplate'
 
 export default function ProposalGate() {
   const { slug } = useParams()

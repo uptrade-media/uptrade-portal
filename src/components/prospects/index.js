@@ -4,7 +4,7 @@
  */
 
 // Pipeline
-export { PIPELINE_STAGES } from '../crm/PipelineKanban'
+export { PIPELINE_STAGES } from '../crm/pipelineStages'
 
 // Detail View
 export { default as ProspectDetailDrawer } from './ProspectDetailDrawer'

@@ -1,7 +1,8 @@
 // src/components/seo/signal/SignalStatusBanner.jsx
 // Shows Signal AI status, memory, and latest insight
 import { motion } from 'framer-motion'
-import { Sparkles, History, Brain, Zap, ArrowRight } from 'lucide-react'
+import { Sparkles, History, Zap, ArrowRight } from 'lucide-react'
+import SignalIcon from '@/components/ui/SignalIcon'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -59,7 +60,7 @@ export default function SignalStatusBanner({
             {hasStats && (
               <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--text-secondary)] mb-3">
                 <span className="flex items-center gap-1">
-                  <Brain className="h-3.5 w-3.5 text-teal-400" />
+                  <SignalIcon className="h-3.5 w-3.5 text-teal-400" />
                   Analyzing {siteDomain} for {analyzingDays} days
                 </span>
                 <span className="text-[var(--text-tertiary)]">•</span>

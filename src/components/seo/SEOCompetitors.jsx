@@ -1,7 +1,8 @@
 // src/components/seo/SEOCompetitors.jsx
 // Competitor Analysis - track and analyze competitor SEO strategies
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { useSeoCompetitors, useAddSeoCompetitor, useAnalyzeCompetitor } from '@/hooks/seo'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -20,26 +21,19 @@ import {
 } from 'lucide-react'
 
 export default function SEOCompetitors({ projectId }) {
-  const { 
-    competitors, 
-    competitorsLoading, 
-    fetchCompetitors,
-    analyzeCompetitor
-  } = useSeoStore()
+  // React Query hooks
+  const { data: competitorsData, isLoading: competitorsLoading } = useSeoCompetitors(projectId)
+  const addCompetitorMutation = useAddSeoCompetitor()
+  const analyzeCompetitorMutation = useAnalyzeCompetitor()
   
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  // Extract data
+  const competitors = competitorsData?.competitors || competitorsData || []
+  
   const [newCompetitor, setNewCompetitor] = useState('')
   const [analyzingId, setAnalyzingId] = useState(null)
 
-  useEffect(() => {
-    if (projectId) {
-      fetchCompetitors(projectId)
-    }
-  }, [projectId])
-
   const handleAddCompetitor = async () => {
     if (!newCompetitor.trim()) return
-    setIsAnalyzing(true)
     try {
       // Clean domain
       let domain = newCompetitor.trim()
@@ -47,23 +41,25 @@ export default function SEOCompetitors({ projectId }) {
         .replace(/^www\./, '')
         .split('/')[0]
       
-      await analyzeCompetitor(projectId, domain)
+      await addCompetitorMutation.mutateAsync({ projectId, domain })
       setNewCompetitor('')
     } catch (error) {
       console.error('Add competitor error:', error)
     }
-    setIsAnalyzing(false)
   }
 
-  const handleReanalyze = async (competitorDomain) => {
+  const handleReanalyze = async (competitorDomain, competitorId) => {
     setAnalyzingId(competitorDomain)
     try {
-      await analyzeCompetitor(projectId, competitorDomain)
+      await analyzeCompetitorMutation.mutateAsync({ projectId, competitorId })
     } catch (error) {
       console.error('Reanalyze error:', error)
     }
     setAnalyzingId(null)
   }
+  
+  // Use mutation loading state for add button
+  const isAnalyzing = addCompetitorMutation.isLoading
 
   const getOverlapColor = (overlap) => {
     if (overlap >= 70) return 'text-red-600'

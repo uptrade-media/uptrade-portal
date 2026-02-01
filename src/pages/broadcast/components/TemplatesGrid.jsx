@@ -11,8 +11,15 @@ import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
-import { useBroadcastStore } from '@/stores/broadcastStore';
+import { 
+  useBroadcastTemplates,
+  useBroadcastConnections,
+  useCreateBroadcastTemplate,
+  useUpdateBroadcastTemplate,
+  useDeleteBroadcastTemplate,
+} from '@/lib/hooks';
 import useAuthStore from '@/lib/auth-store';
+import { EmptyState } from '@/components/EmptyState';
 import { PlatformIcon, PlatformSelector } from './PlatformIcon';
 
 const TEMPLATE_CATEGORIES = [
@@ -31,7 +38,10 @@ function TemplateEditor({
 }) {
   const { currentProject } = useAuthStore();
   const selectedProjectId = currentProject?.id;
-  const { createTemplate, updateTemplate, connections } = useBroadcastStore();
+  
+  const { data: connections = [] } = useBroadcastConnections(selectedProjectId);
+  const createTemplateMutation = useCreateBroadcastTemplate();
+  const updateTemplateMutation = useUpdateBroadcastTemplate();
   
   // Memoize connected platforms to prevent infinite re-renders
   const connectedPlatforms = React.useMemo(() => 
@@ -91,9 +101,9 @@ function TemplateEditor({
       };
 
       if (template) {
-        await updateTemplate(template.id, data);
+        await updateTemplateMutation.mutateAsync({ id: template.id, projectId: selectedProjectId, data });
       } else {
-        await createTemplate(selectedProjectId, data);
+        await createTemplateMutation.mutateAsync({ projectId: selectedProjectId, data });
       }
       onClose();
     } finally {
@@ -202,23 +212,33 @@ function TemplateEditor({
 }
 
 function TemplateCard({ template, onEdit, onUse }) {
-  const { deleteTemplate, duplicateTemplate } = useBroadcastStore();
+  const { currentProject } = useAuthStore();
+  const projectId = currentProject?.id;
+  
+  const deleteTemplateMutation = useDeleteBroadcastTemplate();
+  const createTemplateMutation = useCreateBroadcastTemplate();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
 
   const handleDelete = async () => {
-    setIsLoading(true);
-    try {
-      await deleteTemplate(template.id);
-      setShowDeleteDialog(false);
-    } finally {
-      setIsLoading(false);
-    }
+    deleteTemplateMutation.mutate({ id: template.id, projectId }, {
+      onSuccess: () => setShowDeleteDialog(false),
+    });
   };
 
   const handleDuplicate = async () => {
-    await duplicateTemplate(template.id);
+    createTemplateMutation.mutate({ 
+      projectId, 
+      data: {
+        name: `${template.name} (Copy)`,
+        content: template.content,
+        platforms: template.platforms,
+        category: template.category,
+        hashtags: template.hashtags,
+      }
+    });
   };
+
+  const isLoading = deleteTemplateMutation.isPending;
 
   return (
     <>
@@ -328,9 +348,10 @@ function TemplateCard({ template, onEdit, onUse }) {
 }
 
 export function TemplatesGrid({ searchQuery = '', onUseTemplate }) {
-  const { templates, fetchTemplates } = useBroadcastStore();
   const { currentProject } = useAuthStore();
   const selectedProjectId = currentProject?.id;
+  
+  const { data: templates = [] } = useBroadcastTemplates(selectedProjectId);
 
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [showEditor, setShowEditor] = useState(false);
@@ -382,17 +403,13 @@ export function TemplatesGrid({ searchQuery = '', onUseTemplate }) {
 
       {/* Templates grid */}
       {filteredTemplates.length === 0 ? (
-        <div className="flex h-64 flex-col items-center justify-center rounded-lg border-2 border-dashed border-[var(--glass-border)] bg-[var(--surface-secondary)]/50">
-          <FileText className="mb-2 h-12 w-12 text-[var(--text-tertiary)]" />
-          <h3 className="font-medium text-[var(--text-primary)]">No templates yet</h3>
-          <p className="mb-4 text-sm text-[var(--text-tertiary)]">
-            Create reusable templates to speed up your workflow
-          </p>
-          <Button className="bg-gradient-to-r from-[var(--brand-primary)] to-[var(--brand-secondary)] text-white hover:opacity-90" onClick={() => setShowEditor(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Template
-          </Button>
-        </div>
+        <EmptyState
+          icon={FileText}
+          title="No templates yet"
+          description="Create reusable templates to speed up your workflow"
+          actionLabel="Create Template"
+          onAction={() => setShowEditor(true)}
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filteredTemplates.map((template) => (

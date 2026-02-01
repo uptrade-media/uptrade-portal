@@ -334,7 +334,8 @@ export function createSitemap(config: SitemapConfig): () => SitemapEntry[] | Pro
     // Auto-sync to Portal API at build time (unless disabled)
     if (!config.disableSync) {
       const apiUrl = config.apiUrl || process.env.NEXT_PUBLIC_UPTRADE_API_URL || 'https://api.uptrademedia.com'
-      const apiKey = config.apiKey || process.env.NEXT_PUBLIC_UPTRADE_API_KEY
+      // Server-side operations use UPTRADE_API_KEY, not NEXT_PUBLIC_
+      const apiKey = config.apiKey || process.env.UPTRADE_API_KEY || process.env.NEXT_PUBLIC_UPTRADE_API_KEY
       
       if (apiKey) {
         // Fire and forget - don't block sitemap generation

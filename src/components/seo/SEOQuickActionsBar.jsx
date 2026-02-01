@@ -1,21 +1,24 @@
 // src/components/seo/SEOQuickActionsBar.jsx
 // Quick actions toolbar for common SEO operations
+// MIGRATED TO REACT QUERY - Jan 29, 2026
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
   RefreshCw, 
   Globe, 
   Target, 
-  Brain, 
   Zap,
   Search,
   FileCode,
-  Loader2,
   CheckCircle,
   AlertCircle
 } from 'lucide-react'
+import SignalIcon from '@/components/ui/SignalIcon'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import { cn } from '@/lib/utils'
-import { useSeoStore } from '@/lib/seo-store'
+import { seoApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
+import { seoPageKeys, seoOpportunityKeys, seoGSCKeys, seoTechnicalKeys, seoContentKeys } from '@/hooks/seo'
 
 /**
  * Quick Actions Bar - One-click actions for common SEO tasks
@@ -27,16 +30,15 @@ export default function SEOQuickActionsBar({
   onActionComplete,
   className 
 }) {
-  const {
-    crawlSitemap,
-    detectOpportunities,
-    runAiBrain,
-    fetchPages,
-    fetchOpportunities,
-    fetchGscOverview,
-    fetchGscQueries,
-    fetchCwvSummary
-  } = useSeoStore()
+  const queryClient = useQueryClient()
+  
+  // Helper to invalidate all related queries after an action
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: seoPageKeys.list(projectId) })
+    queryClient.invalidateQueries({ queryKey: seoOpportunityKeys.list(projectId) })
+    queryClient.invalidateQueries({ queryKey: ['seo', 'gsc'] })
+    queryClient.invalidateQueries({ queryKey: seoTechnicalKeys.cwv(projectId) })
+  }
 
   const [actionStates, setActionStates] = useState({})
 
@@ -66,9 +68,9 @@ export default function SEOQuickActionsBar({
       icon: RefreshCw,
       description: 'Fetch latest Search Console data',
       action: async () => {
-        if (domain) {
-          await fetchGscOverview(domain)
-          await fetchGscQueries(domain, { limit: 50 })
+        if (projectId) {
+          await seoApi.syncGsc(projectId)
+          queryClient.invalidateQueries({ queryKey: ['seo', 'gsc'] })
         }
       }
     },
@@ -79,8 +81,8 @@ export default function SEOQuickActionsBar({
       description: 'Re-crawl all pages from sitemap',
       action: async () => {
         if (projectId) {
-          await crawlSitemap(projectId)
-          await fetchPages(projectId, { limit: 100 })
+          await seoApi.crawlSitemap(projectId)
+          queryClient.invalidateQueries({ queryKey: seoPageKeys.list(projectId) })
         }
       }
     },
@@ -91,20 +93,21 @@ export default function SEOQuickActionsBar({
       description: 'Scan for quick wins and issues',
       action: async () => {
         if (projectId) {
-          await detectOpportunities(projectId)
-          await fetchOpportunities(projectId, { limit: 20, status: 'open' })
+          await seoApi.detectOpportunities(projectId)
+          queryClient.invalidateQueries({ queryKey: seoOpportunityKeys.list(projectId) })
         }
       }
     },
     {
       id: 'run-ai',
-      label: 'AI Analysis',
-      icon: Brain,
-      description: 'Run comprehensive AI analysis',
+      label: 'Signal Analysis',
+      icon: SignalIcon,
+      description: 'Run comprehensive Signal analysis',
       variant: 'accent',
       action: async () => {
         if (projectId) {
-          await runAiBrain(projectId, { analysisType: 'comprehensive' })
+          await seoApi.runAiBrain(projectId, { analysisType: 'comprehensive' })
+          queryClient.invalidateQueries({ queryKey: seoContentKeys.aiInsights(projectId) })
         }
       }
     },
@@ -115,7 +118,7 @@ export default function SEOQuickActionsBar({
       description: 'Refresh Core Web Vitals',
       action: async () => {
         if (projectId) {
-          await fetchCwvSummary(projectId)
+          queryClient.invalidateQueries({ queryKey: seoTechnicalKeys.cwv(projectId) })
         }
       }
     }
@@ -123,10 +126,10 @@ export default function SEOQuickActionsBar({
 
   const getButtonState = (actionId) => {
     const state = actionStates[actionId]
-    if (state === 'loading') return { disabled: true, icon: Loader2, className: 'animate-spin' }
-    if (state === 'success') return { disabled: false, icon: CheckCircle, className: 'text-green-400' }
-    if (state === 'error') return { disabled: false, icon: AlertCircle, className: 'text-red-400' }
-    return { disabled: false, icon: null, className: '' }
+    if (state === 'loading') return { disabled: true, loading: true, icon: null, className: '' }
+    if (state === 'success') return { disabled: false, loading: false, icon: CheckCircle, className: 'text-green-400' }
+    if (state === 'error') return { disabled: false, loading: false, icon: AlertCircle, className: 'text-red-400' }
+    return { disabled: false, loading: false, icon: null, className: '' }
   }
 
   return (
@@ -148,7 +151,11 @@ export default function SEOQuickActionsBar({
             )}
             title={action.description}
           >
-            <Icon className={cn('h-4 w-4 mr-2', state.className)} />
+            {state.loading ? (
+              <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
+            ) : Icon ? (
+              <Icon className={cn('h-4 w-4 mr-2', state.className)} />
+            ) : null}
             {action.label}
             
             {/* Tooltip on hover */}
@@ -166,18 +173,18 @@ export default function SEOQuickActionsBar({
  * Compact version for use in header/toolbar
  */
 export function SEOQuickActionsCompact({ projectId, domain, onActionComplete }) {
-  const { crawlSitemap, detectOpportunities, runAiBrain, fetchGscOverview, fetchGscQueries } = useSeoStore()
+  const queryClient = useQueryClient()
   const [running, setRunning] = useState(false)
 
   const handleFullScan = async () => {
     setRunning(true)
     try {
       await Promise.all([
-        domain && fetchGscOverview(domain),
-        domain && fetchGscQueries(domain, { limit: 50 }),
-        projectId && crawlSitemap(projectId),
-        projectId && detectOpportunities(projectId)
+        projectId && seoApi.syncGsc(projectId),
+        projectId && seoApi.detectOpportunities(projectId)
       ])
+      // Invalidate all SEO queries to refetch
+      queryClient.invalidateQueries({ queryKey: ['seo'] })
       onActionComplete?.('full-scan', 'Full scan complete')
     } catch (error) {
       console.error('Full scan failed:', error)
@@ -193,7 +200,7 @@ export function SEOQuickActionsCompact({ projectId, domain, onActionComplete }) 
       disabled={running}
     >
       {running ? (
-        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
       ) : (
         <RefreshCw className="h-4 w-4 mr-2" />
       )}

@@ -32,10 +32,10 @@ import {
   AlertCircle,
   CheckCircle2,
   XCircle,
-  Loader2,
   Pencil,
   UserPlus
 } from 'lucide-react'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -52,9 +52,10 @@ import {
   SentimentBadge,
   StatusBadge
 } from './ui'
-import { PIPELINE_STAGES } from './PipelineKanban'
+import { PIPELINE_STAGES } from './pipelineStages'
 import ProspectCallsTab from './ProspectCallsTab'
 import ProspectTimeline from './ProspectTimeline'
+import ProspectEmailsWithSignal from './ProspectEmailsWithSignal'
 import EditProspectDialog from './EditProspectDialog'
 import AssignContactDialog from './AssignContactDialog'
 import { useProspectTimeline } from '@/hooks/useProspectTimeline'
@@ -262,7 +263,7 @@ function WebsiteTab({
             className="rounded-xl"
           >
             {isAnalyzing ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <UptradeSpinner size="sm" className="mr-2 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
             ) : (
               <RefreshCw className="h-4 w-4 mr-2" />
             )}
@@ -439,7 +440,7 @@ function AuditsTab({
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-[var(--brand-primary)]" />
+          <UptradeSpinner size="md" className="[&_p]:hidden" />
         </div>
       ) : audits.length === 0 ? (
         <GlassEmptyState
@@ -505,7 +506,7 @@ function AuditsTab({
                     )}
                     {(audit.status === 'pending' || audit.status === 'running') && (
                       <div className="flex items-center gap-2 text-amber-600">
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <UptradeSpinner size="sm" className="[&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4 [&_svg]:text-amber-600" />
                         <span className="text-sm">Processing...</span>
                       </div>
                     )}
@@ -611,7 +612,7 @@ function EmailsTab({ emails = [], scheduledFollowups = [], isLoading = false, on
       <div className="space-y-3">
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-[var(--brand-primary)]" />
+          <UptradeSpinner size="md" className="[&_p]:hidden" />
         </div>
       ) : emails.length === 0 ? (
         <GlassEmptyState
@@ -704,7 +705,7 @@ function NotesTab({
             className="self-end rounded-xl"
           >
             {isAddingNote ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <UptradeSpinner size="sm" className="[&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
             ) : (
               <Send className="h-4 w-4" />
             )}
@@ -715,7 +716,7 @@ function NotesTab({
       {/* Notes List */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-[var(--brand-primary)]" />
+          <UptradeSpinner size="md" className="[&_p]:hidden" />
         </div>
       ) : notes.length === 0 ? (
         <GlassEmptyState
@@ -775,7 +776,7 @@ function ActivityTab({ activity = [], isLoading = false }) {
     <div>
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-[var(--brand-primary)]" />
+          <UptradeSpinner size="md" className="[&_p]:hidden" />
         </div>
       ) : activity.length === 0 ? (
         <GlassEmptyState
@@ -1080,12 +1081,30 @@ export default function ProspectDetailPanel({
             </TabsContent>
             
             <TabsContent value="emails" className="mt-0">
-              <EmailsTab 
-                emails={emails} 
-                scheduledFollowups={scheduledFollowups}
-                isLoading={isLoadingEmails} 
-                onCancelFollowup={onCancelFollowup}
+              {/* Gmail threads with Signal insights */}
+              <ProspectEmailsWithSignal
+                prospect={prospect}
+                onComposeEmail={onComposeEmail}
+                brandColors={{
+                  primary: 'var(--brand-primary)',
+                  secondary: 'var(--brand-secondary)'
+                }}
               />
+              
+              {/* Separator for outbound prospecting emails */}
+              {(emails.length > 0 || scheduledFollowups.length > 0) && (
+                <div className="mt-6 pt-6 border-t border-[var(--glass-border)]">
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)] mb-4">
+                    Prospecting Emails
+                  </h4>
+                  <EmailsTab 
+                    emails={emails} 
+                    scheduledFollowups={scheduledFollowups}
+                    isLoading={isLoadingEmails} 
+                    onCancelFollowup={onCancelFollowup}
+                  />
+                </div>
+              )}
             </TabsContent>
             
             <TabsContent value="notes" className="mt-0">

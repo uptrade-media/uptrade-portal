@@ -24,10 +24,14 @@ import {
   Send,
   MessageSquare,
   CheckCheck,
-  XCircle
+  XCircle,
+  Trophy,
+  Medal,
+  Crown
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { crmApi } from '@/lib/portal-api'
 import { useBrandColors } from '@/hooks/useBrandColors'
 import { toast } from '@/lib/toast'
@@ -142,7 +146,8 @@ export default function CRMAnalyticsDashboard({ projectId, isAgency }) {
     stages: [],
     sources: [],
     timeline: [],
-    deals: {}
+    deals: {},
+    teamPerformance: []
   })
 
   useEffect(() => {
@@ -154,14 +159,16 @@ export default function CRMAnalyticsDashboard({ projectId, isAgency }) {
   const fetchAnalytics = async () => {
     setIsLoading(true)
     try {
-      const [summaryRes, velocityRes] = await Promise.all([
+      const [summaryRes, velocityRes, teamRes] = await Promise.all([
         crmApi.getPipelineSummary({ projectId }),
-        crmApi.getPipelineVelocity({ projectId })
+        crmApi.getPipelineVelocity({ projectId }),
+        isAgency ? crmApi.getTeamPerformance({ projectId }) : Promise.resolve({ data: [] })
       ])
 
       // Safely extract data with fallbacks
       const summaryData = summaryRes?.data || {}
       const velocityData = velocityRes?.data || {}
+      const teamData = teamRes?.data || []
 
       setAnalytics({
         summary: summaryData,
@@ -169,7 +176,8 @@ export default function CRMAnalyticsDashboard({ projectId, isAgency }) {
         stages: summaryData.byStage || [],
         sources: summaryData.bySource || [],
         timeline: velocityData.timeline || [],
-        deals: summaryData.deals || {}
+        deals: summaryData.deals || {},
+        teamPerformance: Array.isArray(teamData) ? teamData : teamData.members || []
       })
     } catch (err) {
       console.error('Failed to fetch analytics:', err)
@@ -181,7 +189,8 @@ export default function CRMAnalyticsDashboard({ projectId, isAgency }) {
         stages: [],
         sources: [],
         timeline: [],
-        deals: {}
+        deals: {},
+        teamPerformance: []
       })
     } finally {
       setIsLoading(false)
@@ -199,7 +208,7 @@ export default function CRMAnalyticsDashboard({ projectId, isAgency }) {
     )
   }
 
-  const { summary, velocity, stages, sources, timeline, deals } = analytics
+  const { summary, velocity, stages, sources, timeline, deals, teamPerformance } = analytics
 
   // Process stage data for the breakdown with safety checks
   const stageData = Object.entries(STAGE_CONFIG)
@@ -402,6 +411,92 @@ export default function CRMAnalyticsDashboard({ projectId, isAgency }) {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Team Leaderboard - Agency Only */}
+      {isAgency && teamPerformance && teamPerformance.length > 0 && (
+        <div className="rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <Trophy className="h-5 w-5 text-amber-500" />
+            <div>
+              <h3 className="font-semibold text-[var(--text-primary)]">Team Leaderboard</h3>
+              <p className="text-xs text-muted-foreground">Top performers by revenue</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {teamPerformance
+              .sort((a, b) => (b.revenue || b.total_revenue || 0) - (a.revenue || a.total_revenue || 0))
+              .slice(0, 5)
+              .map((member, index) => {
+                const revenue = member.revenue || member.total_revenue || 0
+                const deals = member.deals_won || member.won_count || 0
+                const conversionRate = member.conversion_rate || 0
+                const name = member.name || member.full_name || member.email || 'Unknown'
+                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+                
+                // Rank styling
+                const RankIcon = index === 0 ? Crown : index === 1 ? Medal : index === 2 ? Trophy : null
+                const rankColor = index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : brandPrimary
+
+                return (
+                  <div
+                    key={member.id || member.user_id || index}
+                    className={cn(
+                      "flex items-center gap-3 p-3 rounded-lg",
+                      "bg-[var(--surface-secondary)] border border-transparent",
+                      index < 3 && "border-l-2",
+                    )}
+                    style={{ borderLeftColor: index < 3 ? rankColor : undefined }}
+                  >
+                    {/* Rank */}
+                    <div 
+                      className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ backgroundColor: `${rankColor}20` }}
+                    >
+                      {RankIcon ? (
+                        <RankIcon className="h-4 w-4" style={{ color: rankColor }} />
+                      ) : (
+                        <span className="text-sm font-bold" style={{ color: rankColor }}>
+                          {index + 1}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Avatar */}
+                    <Avatar className="h-9 w-9">
+                      <AvatarImage src={member.avatar_url} />
+                      <AvatarFallback 
+                        className="text-xs"
+                        style={{ backgroundColor: `${brandPrimary}20`, color: brandPrimary }}
+                      >
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    {/* Name & Stats */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-[var(--text-primary)] truncate">
+                        {name}
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>{deals} deals</span>
+                        <span>•</span>
+                        <span>{formatPercent(conversionRate)} conv.</span>
+                      </div>
+                    </div>
+
+                    {/* Revenue */}
+                    <div className="text-right">
+                      <p className="font-bold text-[var(--text-primary)]">
+                        {formatCurrency(revenue)}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">revenue</p>
+                    </div>
+                  </div>
+                )
+              })}
           </div>
         </div>
       )}

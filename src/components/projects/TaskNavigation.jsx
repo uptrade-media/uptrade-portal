@@ -15,10 +15,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { 
-  UPTRADE_TASK_STATUS_CONFIG, 
-  UPTRADE_TASK_MODULE_CONFIG 
-} from '@/lib/projects-v2-store'
+import { UPTRADE_TASK_STATUS_CONFIG, UPTRADE_TASK_MODULE_CONFIG } from '@/lib/hooks'
 
 // Module icon mapping (matches Sidebar.jsx icons)
 const MODULE_ICONS = {

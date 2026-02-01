@@ -9,7 +9,11 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { useSiteManagementStore } from '@/lib/site-management-store'
+import { 
+  useCreateSiteSchema, 
+  useUpdateSiteSchemaItem, 
+  useDeleteSiteSchema 
+} from '@/lib/hooks'
 import {
   Dialog,
   DialogContent,
@@ -92,7 +96,11 @@ export default function SiteSchemaPanel({ project, schema = [] }) {
   const [editingSchema, setEditingSchema] = useState(null)
   const [isDeleting, setIsDeleting] = useState(null)
   const [presetType, setPresetType] = useState(null)
-  const store = useSiteManagementStore()
+  
+  // React Query mutations
+  const createSchemaMutation = useCreateSiteSchema()
+  const updateSchemaMutation = useUpdateSiteSchemaItem()
+  const deleteSchemaMutation = useDeleteSiteSchema()
   
   const filteredSchema = schema.filter(s =>
     s.schema_type?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -110,7 +118,7 @@ export default function SiteSchemaPanel({ project, schema = [] }) {
   const handleDelete = async (schemaId) => {
     setIsDeleting(schemaId)
     try {
-      await store.deleteSchema(schemaId)
+      await deleteSchemaMutation.mutateAsync({ id: schemaId, projectId: project.id })
       toast.success('Schema deleted')
     } catch (error) {
       toast.error('Failed to delete schema')
@@ -169,7 +177,7 @@ export default function SiteSchemaPanel({ project, schema = [] }) {
           }}
           preset={presetType}
           onSubmit={async (data) => {
-            await store.createSchema(data)
+            await createSchemaMutation.mutateAsync({ projectId: project.id, data })
             toast.success('Schema created')
             setIsCreateOpen(false)
             setPresetType(null)
@@ -282,7 +290,7 @@ export default function SiteSchemaPanel({ project, schema = [] }) {
         }}
         preset={presetType}
         onSubmit={async (data) => {
-          await store.createSchema(data)
+          await createSchemaMutation.mutateAsync({ projectId: project.id, data })
           toast.success('Schema created')
           setIsCreateOpen(false)
           setPresetType(null)
@@ -295,7 +303,11 @@ export default function SiteSchemaPanel({ project, schema = [] }) {
         open={!!editingSchema}
         onOpenChange={(open) => !open && setEditingSchema(null)}
         onSubmit={async (data) => {
-          await store.updateSchema(editingSchema.id, data)
+          await updateSchemaMutation.mutateAsync({ 
+            id: editingSchema.id, 
+            projectId: project.id, 
+            data 
+          })
           toast.success('Schema updated')
           setEditingSchema(null)
         }}

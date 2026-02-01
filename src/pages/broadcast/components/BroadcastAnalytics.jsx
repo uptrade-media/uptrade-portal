@@ -16,12 +16,13 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/EmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
-import { useBroadcastStore } from '@/stores/broadcastStore';
+import { useBroadcastAnalytics } from '@/lib/hooks';
 import useAuthStore from '@/lib/auth-store';
 import { PlatformIcon } from './PlatformIcon';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -37,7 +38,7 @@ function StatCard({ title, value, change, icon: Icon, trend }) {
   const TrendIcon = isPositive ? ArrowUp : ArrowDown;
   
   return (
-    <Card className="bg-[var(--glass-bg)]">
+    <Card className="bg-card/80 backdrop-blur-sm">
       <CardContent className="p-6">
         <div className="flex items-center justify-between">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--surface-secondary)]">
@@ -71,7 +72,7 @@ function PlatformCard({ platform, data }) {
   ];
 
   return (
-    <Card className="bg-[var(--glass-bg)]">
+    <Card className="bg-card/80 backdrop-blur-sm">
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           <PlatformIcon platform={platform} className="h-5 w-5" />
@@ -158,44 +159,21 @@ export function BroadcastAnalytics() {
   const { currentProject } = useAuthStore();
   const projectId = currentProject?.id;
 
-  const {
-    analytics,
-    analyticsLoading,
-    analyticsPeriod,
-    fetchAnalytics,
-    fetchTopPosts,
-  } = useBroadcastStore();
-
   const [period, setPeriod] = useState('7d');
   const [topPosts, setTopPosts] = useState([]);
   const [topPostsLoading, setTopPostsLoading] = useState(false);
 
-  // Fetch analytics on mount and period change
-  useEffect(() => {
-    if (projectId) {
-      fetchAnalytics(projectId, period);
-      loadTopPosts();
-    }
-  }, [projectId, period]);
+  const { data: analytics = {}, isLoading: analyticsLoading, refetch: refetchAnalytics } = useBroadcastAnalytics(projectId, period);
 
-  const loadTopPosts = async () => {
-    if (!projectId) return;
-    setTopPostsLoading(true);
-    try {
-      const posts = await fetchTopPosts(projectId, period, 5);
-      setTopPosts(posts || []);
-    } catch (error) {
-      console.error('Failed to load top posts:', error);
-    } finally {
-      setTopPostsLoading(false);
+  // Load top posts when period changes
+  useEffect(() => {
+    if (projectId && analytics?.topPosts) {
+      setTopPosts(analytics.topPosts || []);
     }
-  };
+  }, [projectId, analytics]);
 
   const handleRefresh = () => {
-    if (projectId) {
-      fetchAnalytics(projectId, period);
-      loadTopPosts();
-    }
+    refetchAnalytics();
   };
 
   // Calculate totals from analytics data
@@ -266,7 +244,7 @@ export function BroadcastAnalytics() {
       <div>
         <h3 className="mb-4 text-base font-medium text-[var(--text-primary)]">Platform Breakdown</h3>
         {platforms.length === 0 ? (
-          <Card className="bg-[var(--glass-bg)]">
+          <Card className="bg-card/80 backdrop-blur-sm">
             <CardContent className="flex flex-col items-center justify-center py-8 text-[var(--text-tertiary)]">
               <BarChart3 className="mb-2 h-8 w-8 text-[var(--text-tertiary)]" />
               <p className="text-sm">No platform data available</p>
@@ -294,11 +272,13 @@ export function BroadcastAnalytics() {
             <RefreshCw className="h-5 w-5 animate-spin text-[var(--text-tertiary)]" />
           </div>
         ) : topPosts.length === 0 ? (
-          <Card className="bg-[var(--glass-bg)]">
-            <CardContent className="flex flex-col items-center justify-center py-8 text-[var(--text-tertiary)]">
-              <TrendingUp className="mb-2 h-8 w-8 text-[var(--text-tertiary)]" />
-              <p className="text-sm">No posts in this period</p>
-              <p className="text-xs text-[var(--text-tertiary)]">Publish some posts to see performance data</p>
+          <Card className="bg-card/80 backdrop-blur-sm">
+            <CardContent className="p-0">
+              <EmptyState.Card
+                icon={TrendingUp}
+                title="No posts in this period"
+                description="Publish some posts to see performance data"
+              />
             </CardContent>
           </Card>
         ) : (
@@ -314,7 +294,7 @@ export function BroadcastAnalytics() {
       {analytics?.byContentType && (
         <div>
           <h3 className="mb-4 text-base font-medium text-[var(--text-primary)]">Engagement by Content Type</h3>
-          <Card className="bg-[var(--glass-bg)]">
+          <Card className="bg-card/80 backdrop-blur-sm">
             <CardContent className="p-6">
               <div className="space-y-4">
                 {Object.entries(analytics.byContentType).map(([type, data]) => (

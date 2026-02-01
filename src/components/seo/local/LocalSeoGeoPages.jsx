@@ -1,7 +1,10 @@
 // src/components/seo/local/LocalSeoGeoPages.jsx
 // Geo Page Coverage - Track location/service area landing pages
+// MIGRATED TO REACT QUERY - Jan 29, 2026
 import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useSeoGeoPages, seoLocalKeys } from '@/hooks/seo'
+import { locationPagesApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -31,8 +34,12 @@ import {
   ArrowUpDown,
   Filter,
   BarChart3,
-  Globe
+  Globe,
+  Sparkles
 } from 'lucide-react'
+import SignalIcon from '@/components/ui/SignalIcon'
+import LocationPageGenerator from './LocationPageGenerator'
+import LocationIntelligenceWizard from './LocationIntelligenceWizard'
 
 // Status colors and labels
 const STATUS_CONFIG = {
@@ -43,32 +50,55 @@ const STATUS_CONFIG = {
 }
 
 export default function LocalSeoGeoPages({ projectId }) {
+  const queryClient = useQueryClient()
   const [isLoading, setIsLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [sortBy, setSortBy] = useState('location')
   const [sortDir, setSortDir] = useState('asc')
   const [filterStatus, setFilterStatus] = useState('all')
+  const [showGenerator, setShowGenerator] = useState(false)
+  const [showIntelligenceWizard, setShowIntelligenceWizard] = useState(false)
+  
+  // Services for the project (would come from project settings or SEO knowledge base)
+  const [services, setServices] = useState([])
 
-  const { 
-    geoPages,
-    fetchGeoPages,
-    geoPagesLoading
-  } = useSeoStore()
+  // React Query hook for geo pages
+  const { data: geoPages = [], isLoading: geoPagesLoading, refetch: refetchGeoPages } = useSeoGeoPages(projectId)
 
   useEffect(() => {
     if (projectId) {
-      fetchGeoPages(projectId)
+      loadServices()
     }
   }, [projectId])
+
+  const loadServices = async () => {
+    // Load services from project settings or SEO knowledge base
+    // For now, these are the typical services for a law firm
+    // TODO: Pull from seo_knowledge_base or project_services table
+    setServices([
+      { slug: 'adoption', name: 'Adoption', description: 'Adoption services' },
+      { slug: 'divorce', name: 'Divorce', description: 'Divorce and separation' },
+      { slug: 'custody', name: 'Child Custody', description: 'Child custody and visitation' },
+      { slug: 'personal-injury', name: 'Personal Injury', description: 'Personal injury cases' },
+      { slug: 'child-protection', name: 'Child Protection', description: 'CPS defense' },
+      { slug: 'family-law', name: 'Family Law', description: 'General family law' }
+    ])
+  }
 
   const handleRefresh = async () => {
     setIsLoading(true)
     try {
-      await fetchGeoPages(projectId)
+      await refetchGeoPages()
     } catch (error) {
       console.error('Failed to fetch geo pages:', error)
     }
     setIsLoading(false)
+  }
+
+  const handleGenerationSuccess = async (result) => {
+    console.log('Generation complete:', result)
+    // Refresh the geo pages list to show newly generated pages
+    await refetchGeoPages()
   }
 
   // Filter and sort pages
@@ -149,18 +179,27 @@ export default function LocalSeoGeoPages({ projectId }) {
         <div className="flex items-center gap-2">
           <Button 
             variant="outline"
-            className="border-[var(--glass-border)]"
+            onClick={() => setShowGenerator(true)}
+            className="border-[var(--glass-border)] hover:border-[var(--brand-primary)]"
           >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Location
+            <Sparkles className="h-4 w-4 mr-2" style={{ color: 'var(--brand-primary)' }} />
+            Quick Generate
           </Button>
           <Button 
+            onClick={() => setShowIntelligenceWizard(true)}
+            className="bg-gradient-to-r from-[var(--brand-primary)] to-[var(--brand-secondary)] hover:opacity-90"
+          >
+            <SignalIcon className="h-4 w-4 mr-2" />
+            Location Intelligence
+          </Button>
+          <Button 
+            variant="outline"
             onClick={handleRefresh}
             disabled={isLoading || geoPagesLoading}
-            className="bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)]"
+            className="border-[var(--glass-border)]"
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-            Analyze Pages
+            Analyze
           </Button>
         </div>
       </div>
@@ -404,7 +443,7 @@ export default function LocalSeoGeoPages({ projectId }) {
           <CardHeader>
             <CardTitle>Page Recommendations</CardTitle>
             <CardDescription>
-              AI-powered suggestions to improve your geo pages
+              Signal-powered suggestions to improve your geo pages
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -451,6 +490,25 @@ export default function LocalSeoGeoPages({ projectId }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Location Page Generator Modal */}
+      <LocationPageGenerator
+        open={showGenerator}
+        onOpenChange={setShowGenerator}
+        projectId={projectId}
+        services={services}
+        onSuccess={handleGenerationSuccess}
+      />
+
+      {/* Location Intelligence Wizard - Premium Experience */}
+      <LocationIntelligenceWizard
+        open={showIntelligenceWizard}
+        onOpenChange={setShowIntelligenceWizard}
+        projectId={projectId}
+        services={services}
+        existingLocations={geoPages}
+        onSuccess={handleGenerationSuccess}
+      />
     </div>
   )
 }

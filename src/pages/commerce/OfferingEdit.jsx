@@ -1,11 +1,13 @@
 // src/pages/commerce/OfferingEdit.jsx
 // Edit existing offering form - supports all types with image upload
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { useCommerceStore } from '@/lib/commerce-store'
-import { useFormsStore } from '@/lib/forms-store'
-import { useSeoStore } from '@/lib/seo-store'
+import { useCommerceOffering, useUpdateCommerceOffering, commerceKeys } from '@/lib/hooks'
+import { useForms, formsKeys } from '@/lib/hooks'
+import { useSeoPages } from '@/hooks/seo'
+import { useQueryClient } from '@tanstack/react-query'
 import useAuthStore from '@/lib/auth-store'
 import { useBrandColors } from '@/hooks/useBrandColors'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -76,7 +78,9 @@ export default function OfferingEdit({ offeringId, onBack }) {
   const { currentProject } = useAuthStore()
   const { currentOffering, fetchOffering, updateOffering } = useCommerceStore()
   const { forms, fetchForms, isLoading: formsLoading } = useFormsStore()
-  const { pages: seoPages, fetchPages, pagesLoading } = useSeoStore()
+  // Use React Query hook for SEO pages
+  const { data: seoPagesResponse, isLoading: pagesLoading } = useSeoPages(currentProject?.id, { limit: 200 })
+  const seoPages = seoPagesResponse?.data?.pages || seoPagesResponse?.pages || []
   const brandColors = useBrandColors()
 
   const [loading, setLoading] = useState(true)
@@ -97,10 +101,9 @@ export default function OfferingEdit({ offeringId, onBack }) {
         })
       // Load forms for service intake selection
       fetchForms({ projectId: currentProject.id })
-      // Load SEO pages for page association
-      fetchPages(currentProject.id, { limit: 200 })
+      // SEO pages are now fetched via React Query hook automatically
     }
-  }, [currentProject?.id, id, fetchOffering, fetchForms, fetchPages])
+  }, [currentProject?.id, id, fetchOffering, fetchForms])
 
   // Populate form when offering loads
   useEffect(() => {

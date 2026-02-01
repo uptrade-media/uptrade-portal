@@ -1,6 +1,7 @@
 // src/components/signal/SignalModule.jsx
 // Main Signal Module - The living AI brain dashboard
 // Signal = AI framework/brain, Echo = conversational interface/voice
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026 (CRUD via hooks, UI state via signal-store)
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -28,7 +29,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils'
 import useAuthStore from '@/lib/auth-store'
 import { projectsApi } from '@/lib/portal-api'
-import { useSignalStore } from '@/lib/signal-store'
+import { useSignalStore } from '@/lib/signal-store' // Keep for streaming UI state
+import { useSignalConfig, useKnowledge, signalKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 
 // Sub-components
 import SignalPulse from './pulse/SignalPulse'
@@ -209,7 +212,7 @@ export default function SignalModule({ projectId: propProjectId, onNavigate }) {
   }
 
   return (
-    <div className="relative min-h-screen">
+    <div className="relative h-full min-h-0 flex flex-col">
       {/* Ambient background */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <motion.div 
@@ -224,7 +227,8 @@ export default function SignalModule({ projectId: propProjectId, onNavigate }) {
         />
       </div>
       
-      <div className="relative z-10 space-y-6 p-6">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto">
+        <div className="space-y-6 p-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -328,6 +332,7 @@ export default function SignalModule({ projectId: propProjectId, onNavigate }) {
             {renderTabContent()}
           </motion.div>
         </AnimatePresence>
+        </div>
       </div>
     </div>
   )

@@ -10,7 +10,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { useSiteManagementStore } from '@/lib/site-management-store'
+import { 
+  useCreateSiteContent, 
+  useUpdateSiteContent, 
+  useDeleteSiteContent 
+} from '@/lib/hooks'
 import {
   Dialog,
   DialogContent,
@@ -54,7 +58,11 @@ export default function SiteContentPanel({ project, content = [] }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingContent, setEditingContent] = useState(null)
   const [isDeleting, setIsDeleting] = useState(null)
-  const store = useSiteManagementStore()
+  
+  // React Query mutations
+  const createContentMutation = useCreateSiteContent()
+  const updateContentMutation = useUpdateSiteContent()
+  const deleteContentMutation = useDeleteSiteContent()
   
   const filteredContent = content.filter(c =>
     c.path?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -64,7 +72,7 @@ export default function SiteContentPanel({ project, content = [] }) {
   const handleDelete = async (contentId) => {
     setIsDeleting(contentId)
     try {
-      await store.deleteContent(contentId)
+      await deleteContentMutation.mutateAsync({ id: contentId, projectId: project.id })
       toast.success('Content block deleted')
     } catch (error) {
       toast.error('Failed to delete content')
@@ -90,7 +98,7 @@ export default function SiteContentPanel({ project, content = [] }) {
           open={isCreateOpen}
           onOpenChange={setIsCreateOpen}
           onSubmit={async (data) => {
-            await store.createContent(data)
+            await createContentMutation.mutateAsync({ projectId: project.id, data })
             toast.success('Content block created')
             setIsCreateOpen(false)
           }}
@@ -187,7 +195,7 @@ export default function SiteContentPanel({ project, content = [] }) {
         open={isCreateOpen}
         onOpenChange={setIsCreateOpen}
         onSubmit={async (data) => {
-          await store.createContent(data)
+          await createContentMutation.mutateAsync({ projectId: project.id, data })
           toast.success('Content block created')
           setIsCreateOpen(false)
         }}
@@ -199,7 +207,11 @@ export default function SiteContentPanel({ project, content = [] }) {
         open={!!editingContent}
         onOpenChange={(open) => !open && setEditingContent(null)}
         onSubmit={async (data) => {
-          await store.updateContent(editingContent.id, data)
+          await updateContentMutation.mutateAsync({ 
+            id: editingContent.id, 
+            projectId: project.id, 
+            data 
+          })
           toast.success('Content updated')
           setEditingContent(null)
         }}

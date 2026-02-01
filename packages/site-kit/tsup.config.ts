@@ -42,9 +42,37 @@ export default defineConfig({
     
     // Reputation module
     'reputation/index': 'src/reputation/index.ts',
+    
+    // LLMs module (llms.txt, AEO components)
+    'llms/index': 'src/llms/index.ts',
+    
+    // CLI (built alongside library)
+    'cli/index': 'src/cli/index.ts',
   },
   format: ['cjs', 'esm'],
-  dts: true,
+  dts: {
+    // Skip DTS for CLI
+    entry: {
+      'index': 'src/index.ts',
+      'seo/index': 'src/seo/index.ts',
+      'seo/server': 'src/seo/server.ts',
+      'analytics/index': 'src/analytics/index.ts',
+      'engage/index': 'src/engage/index.ts',
+      'forms/index': 'src/forms/index.ts',
+      'blog/index': 'src/blog/index.ts',
+      'blog/server': 'src/blog/server.ts',
+      'commerce/index': 'src/commerce/index.ts',
+      'commerce/server': 'src/commerce/server.ts',
+      'setup/index': 'src/setup/index.ts',
+      'setup/client': 'src/setup/client.ts',
+      'setup/server': 'src/setup/server.ts',
+      'sitemap/index': 'src/sitemap/index.ts',
+      'redirects/index': 'src/redirects/index.ts',
+      'images/index': 'src/images/index.ts',
+      'reputation/index': 'src/reputation/index.ts',
+      'llms/index': 'src/llms/index.ts',
+    },
+  },
   splitting: true,
   sourcemap: true,
   clean: true,
@@ -52,9 +80,43 @@ export default defineConfig({
     'react',
     'react-dom',
     'next',
-    '@supabase/supabase-js'
+    '@supabase/supabase-js',
+    'server-only',
+  ],
+  // CLI dependencies should not be externalized
+  noExternal: [
+    'chalk',
+    'commander',
+    'inquirer',
+    'ora',
+    'glob',
+    'open',
   ],
   treeshake: true,
   minify: false,
   target: 'es2020',
+  async onSuccess() {
+    // Add shebang to CLI file after build
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    
+    const cliFiles = ['dist/cli/index.js', 'dist/cli/index.mjs']
+    for (const file of cliFiles) {
+      try {
+        const fullPath = path.join(process.cwd(), file)
+        let content = await fs.readFile(fullPath, 'utf-8')
+        
+        // Remove any existing shebang and add a fresh one
+        content = content.replace(/^#!.*\n?/gm, '')
+        content = '#!/usr/bin/env node\n' + content
+        
+        await fs.writeFile(fullPath, content, 'utf-8')
+        
+        // Make executable
+        await fs.chmod(fullPath, 0o755)
+      } catch {
+        // File might not exist
+      }
+    }
+  },
 })

@@ -1,7 +1,10 @@
 // src/components/seo/SEOIndexingIssues.jsx
 // Display and manage GSC indexing issues
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { useSeoIndexingIssues, useRequestIndexing, seoTechnicalKeys } from '@/hooks/seo'
+import { seoApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -26,36 +29,27 @@ import {
 } from "@/components/ui/accordion"
 
 export default function SEOIndexingIssues({ projectId }) {
-  const { 
-    indexingStatus, 
-    indexingLoading, 
-    indexingError,
-    fetchIndexingStatus,
-    analyzeIndexingIssues,
-    inspectUrl,
-    fetchSitemapsStatus
-  } = useSeoStore()
+  const queryClient = useQueryClient()
   
-  const [sitemaps, setSitemaps] = useState(null)
+  // React Query hooks
+  const { data: indexingData, isLoading: indexingLoading, error: indexingError } = useSeoIndexingIssues(projectId)
+  const requestIndexingMutation = useRequestIndexing()
+  
+  // Extract data
+  const indexingStatus = indexingData?.status || indexingData || {}
+  const sitemaps = indexingData?.sitemaps || null
+  
   const [inspecting, setInspecting] = useState(null)
   const [inspectionResult, setInspectionResult] = useState(null)
 
-  useEffect(() => {
-    if (projectId) {
-      loadData()
-    }
-  }, [projectId])
-
   const loadData = async () => {
-    await analyzeIndexingIssues(projectId)
-    const sitemapData = await fetchSitemapsStatus(projectId)
-    setSitemaps(sitemapData)
+    queryClient.invalidateQueries({ queryKey: seoTechnicalKeys.indexing(projectId) })
   }
 
   const handleInspectUrl = async (url) => {
     setInspecting(url)
     try {
-      const result = await inspectUrl(projectId, url)
+      const result = await seoApi.inspectUrl(projectId, url)
       setInspectionResult({ url, ...result })
     } catch (err) {
       console.error('Inspection failed:', err)
@@ -346,7 +340,7 @@ export default function SEOIndexingIssues({ projectId }) {
       {indexingError && (
         <Card className="border-red-200 bg-red-50">
           <CardContent className="py-4">
-            <p className="text-red-700">{indexingError}</p>
+            <p className="text-red-700">{indexingError?.message ?? String(indexingError)}</p>
           </CardContent>
         </Card>
       )}

@@ -4,8 +4,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import ProposalTemplate from '@/components/ProposalTemplate'
-import ProposalViewWithAnalytics from '@/components/ProposalViewWithAnalytics'
+import ProposalTemplate from '@/components/proposals/ProposalTemplate'
+import ProposalViewWithAnalytics from '@/components/proposals/ProposalViewWithAnalytics'
 import ContractEditorWithAI from '@/components/ContractEditorWithAI'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -38,8 +38,8 @@ import {
 import useAuthStore from '@/lib/auth-store'
 import { portalApi, commerceApi, proposalsApi, adminApi, crmApi } from '@/lib/portal-api'
 import ContractAIDialog from '@/components/ContractAIDialog'
-import ProposalAIDialog from '@/components/ProposalAIDialog'
-import EditProposalDialog from '@/components/EditProposalDialog'
+import ProposalAIDialog from '@/components/proposals/ProposalAIDialog'
+import EditProposalDialog from '@/components/proposals/EditProposalDialog'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Progress } from '@/components/ui/progress'
 

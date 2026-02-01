@@ -10,7 +10,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { useSiteManagementStore } from '@/lib/site-management-store'
+import { 
+  useCreateSiteFaq, 
+  useUpdateSiteFaq, 
+  useDeleteSiteFaq 
+} from '@/lib/hooks'
 import {
   Collapsible,
   CollapsibleContent,
@@ -37,7 +41,11 @@ export default function SiteFAQsPanel({ project, faqs = [] }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingFaq, setEditingFaq] = useState(null)
   const [isDeleting, setIsDeleting] = useState(null)
-  const store = useSiteManagementStore()
+  
+  // React Query mutations
+  const createFaqMutation = useCreateSiteFaq()
+  const updateFaqMutation = useUpdateSiteFaq()
+  const deleteFaqMutation = useDeleteSiteFaq()
   
   const toggleFaq = (id) => {
     const next = new Set(expandedFaqs)
@@ -52,7 +60,7 @@ export default function SiteFAQsPanel({ project, faqs = [] }) {
   const handleDelete = async (faqId) => {
     setIsDeleting(faqId)
     try {
-      await store.deleteFaq(faqId)
+      await deleteFaqMutation.mutateAsync({ id: faqId, projectId: project.id })
       toast.success('FAQ section deleted')
     } catch (error) {
       toast.error('Failed to delete FAQ')
@@ -78,7 +86,7 @@ export default function SiteFAQsPanel({ project, faqs = [] }) {
           open={isCreateOpen}
           onOpenChange={setIsCreateOpen}
           onSubmit={async (data) => {
-            await store.createFaq(data)
+            await createFaqMutation.mutateAsync({ projectId: project.id, data })
             toast.success('FAQ section created')
             setIsCreateOpen(false)
           }}
@@ -183,7 +191,7 @@ export default function SiteFAQsPanel({ project, faqs = [] }) {
         open={isCreateOpen}
         onOpenChange={setIsCreateOpen}
         onSubmit={async (data) => {
-          await store.createFaq(data)
+          await createFaqMutation.mutateAsync({ projectId: project.id, data })
           toast.success('FAQ section created')
           setIsCreateOpen(false)
         }}
@@ -195,7 +203,11 @@ export default function SiteFAQsPanel({ project, faqs = [] }) {
         open={!!editingFaq}
         onOpenChange={(open) => !open && setEditingFaq(null)}
         onSubmit={async (data) => {
-          await store.updateFaq(editingFaq.id, data)
+          await updateFaqMutation.mutateAsync({ 
+            id: editingFaq.id, 
+            projectId: project.id, 
+            data 
+          })
           toast.success('FAQ updated')
           setEditingFaq(null)
         }}

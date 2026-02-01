@@ -3,8 +3,13 @@
 // Integrated into Blog module (moved from SEO module for better workflow)
 // Supports embedded mode when used from BlogDashboard (hides header and tabs)
 
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useState } from 'react'
+import {
+  useBlogTopicRecommendations,
+  useAnalyzeAllBlogPosts,
+  useFixBlogPostEmDashes,
+  useOptimizeBlogPost
+} from '@/lib/hooks/use-seo'
 import { useSignalAccess } from '@/lib/signal-access'
 import SignalUpgradeCard from '@/components/seo/signal/SignalUpgradeCard'
 import SignalIcon from '@/components/ui/SignalIcon'
@@ -38,7 +43,7 @@ function TopicIdeasContent({
   projectId,
   blogTopicRecommendations,
   blogBrainLoading,
-  fetchBlogTopicRecommendations,
+  refetchTopics,
   onCreateFromTopic,
   copiedId,
   setCopiedId
@@ -74,7 +79,7 @@ function TopicIdeasContent({
             </CardDescription>
           </div>
           <Button 
-            onClick={() => fetchBlogTopicRecommendations(projectId)}
+            onClick={() => refetchTopics()}
             disabled={blogBrainLoading}
             variant="outline"
           >
@@ -583,34 +588,26 @@ export default function BlogBrain({
   const [allPostsAnalysis, setAllPostsAnalysis] = useState(null)
   const [fixingEmDashes, setFixingEmDashes] = useState(false)
   
-  const {
-    blogTopicRecommendations,
-    blogPostAnalysis,
-    blogBrainLoading,
-    blogBrainError,
-    fetchBlogTopicRecommendations,
-    analyzeAllBlogPosts,
-    fixAllBlogPostEmDashes,
-    optimizeBlogPost
-  } = useSeoStore()
-
-  // Load topic recommendations on mount
-  useEffect(() => {
-    if (projectId && activeTab === 'topics' && hasSignalAccess) {
-      fetchBlogTopicRecommendations(projectId)
-    }
-  }, [projectId, activeTab, hasSignalAccess])
-
-  // Load all posts analysis when switching to audit tab
-  useEffect(() => {
-    if (activeTab === 'audit' && !allPostsAnalysis && hasSignalAccess) {
-      loadAllPostsAnalysis()
-    }
-  }, [activeTab, hasSignalAccess])
+  // React Query hooks
+  const { 
+    data: blogTopicRecommendations = [], 
+    isLoading: topicsLoading,
+    refetch: refetchTopics
+  } = useBlogTopicRecommendations(projectId, {
+    enabled: activeTab === 'topics' && hasSignalAccess
+  })
+  
+  const analyzeAllPostsMutation = useAnalyzeAllBlogPosts()
+  const fixEmDashesMutation = useFixBlogPostEmDashes()
+  const optimizePostMutation = useOptimizeBlogPost()
+  
+  const blogBrainLoading = topicsLoading || analyzeAllPostsMutation.isPending
+  const blogBrainError = analyzeAllPostsMutation.error?.message || fixEmDashesMutation.error?.message
+  const blogPostAnalysis = optimizePostMutation.data
 
   const loadAllPostsAnalysis = async () => {
     try {
-      const result = await analyzeAllBlogPosts()
+      const result = await analyzeAllPostsMutation.mutateAsync({ projectId })
       setAllPostsAnalysis(result)
     } catch (error) {
       console.error('Failed to analyze posts:', error)
@@ -620,7 +617,7 @@ export default function BlogBrain({
   const handleFixAllEmDashes = async () => {
     setFixingEmDashes(true)
     try {
-      const result = await fixAllBlogPostEmDashes()
+      const result = await fixEmDashesMutation.mutateAsync({ projectId })
       await loadAllPostsAnalysis()
       alert(`Fixed ${result.fixed} posts with em dashes!`)
     } catch (error) {
@@ -632,7 +629,7 @@ export default function BlogBrain({
 
   const handleOptimizePost = async (postId) => {
     try {
-      await optimizeBlogPost(postId, projectId, { applyChanges: false })
+      await optimizePostMutation.mutateAsync({ postId, projectId, options: { applyChanges: false } })
     } catch (error) {
       console.error('Failed to optimize post:', error)
     }
@@ -656,7 +653,7 @@ export default function BlogBrain({
             projectId={projectId}
             blogTopicRecommendations={blogTopicRecommendations}
             blogBrainLoading={blogBrainLoading}
-            fetchBlogTopicRecommendations={fetchBlogTopicRecommendations}
+            refetchTopics={refetchTopics}
             onCreateFromTopic={onCreateFromTopic}
             copiedId={copiedId}
             setCopiedId={setCopiedId}

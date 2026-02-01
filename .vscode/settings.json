@@ -5,5 +5,20 @@
   ],
   "deno.unstable": true,
   "deno.importMap": ".netlify/edge-functions-import-map.json",
-  "deno.path": "C:\\Users\\Ramsey\\AppData\\Roaming\\netlify\\Config\\deno-cli\\deno.exe"
+  "deno.path": "C:\\Users\\Ramsey\\AppData\\Roaming\\netlify\\Config\\deno-cli\\deno.exe",
+  "chat.mcp.serverSampling": {
+    "uptrade-portal-vite/.vscode/mcp.json: supabase": {
+      "allowedModels": [
+        "copilot/auto",
+        "copilot/claude-haiku-4.5",
+        "copilot/claude-opus-4.5",
+        "anthropic/claude-sonnet-4-5-20250929",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview",
+        "copilot/gpt-5.1-codex-max",
+        "copilot/gpt-5.2",
+        "copilot/gpt-5.2-codex"
+      ]
+    }
+  }
 }

@@ -12,9 +12,10 @@ import { useState, useMemo, useCallback } from 'react'
 import { 
   X, Download, ExternalLink, Clock, Calendar, User, Check, 
   AlertCircle, MessageSquare, Edit2, Trash2, MoreHorizontal,
-  ChevronLeft, ChevronRight, FileText, Image, File, Loader2,
+  ChevronLeft, ChevronRight, FileText, Image, File,
   Send, ThumbsUp, ThumbsDown, RotateCcw
 } from 'lucide-react'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import { cn } from '@/lib/utils'
 
@@ -47,8 +48,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-// Store
-import { useDeliverablesStore, deliverableStatusConfig, deliverableTypeConfig } from '@/lib/projects-v2-store'
+// Config
+import { deliverableStatusConfig, deliverableTypeConfig } from '@/lib/hooks'
+import { EmptyState } from '@/components/EmptyState'
 
 // File type helpers
 function getFileIcon(fileType) {
@@ -90,7 +92,7 @@ function FilePreview({ deliverable, className }) {
       <div className={cn("relative bg-muted rounded-lg overflow-hidden", className)}>
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <UptradeSpinner size="md" className="[&_p]:hidden [&_svg]:text-muted-foreground" />
           </div>
         )}
         {error ? (
@@ -201,7 +203,7 @@ function ApprovalActions({
   if (status === 'draft' && isAdmin) {
     return (
       <Button onClick={() => onSubmitForReview?.()} disabled={isLoading}>
-        {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+        {isLoading ? <UptradeSpinner size="sm" className="mr-1 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" /> : <Send className="h-4 w-4 mr-1" />}
         Submit for Review
       </Button>
     )
@@ -313,7 +315,7 @@ function ApprovalActions({
   if (status === 'needs_changes' && isAdmin) {
     return (
       <Button onClick={() => onSubmitForReview?.()} disabled={isLoading}>
-        {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-1" />}
+        {isLoading ? <UptradeSpinner size="sm" className="mr-1 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" /> : <RotateCcw className="h-4 w-4 mr-1" />}
         Resubmit for Review
       </Button>
     )
@@ -323,7 +325,7 @@ function ApprovalActions({
   if (status === 'approved' && isAdmin) {
     return (
       <Button onClick={() => onDeliver?.()} disabled={isLoading}>
-        {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
+        {isLoading ? <UptradeSpinner size="sm" className="mr-1 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" /> : <Check className="h-4 w-4 mr-1" />}
         Mark as Delivered
       </Button>
     )
@@ -592,10 +594,11 @@ export default function DeliverableDetailDrawer({
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>No comments yet</p>
-                  </div>
+                  <EmptyState.List
+                    icon={MessageSquare}
+                    title="No comments yet"
+                    description="Add a comment below to start the conversation."
+                  />
                 )}
 
                 {/* Add comment */}
@@ -668,7 +671,7 @@ export default function DeliverableDetailDrawer({
               disabled={isLoading}
               className="bg-red-600 hover:bg-red-700"
             >
-              {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+              {isLoading ? <UptradeSpinner size="sm" className="mr-1 [&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" /> : null}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

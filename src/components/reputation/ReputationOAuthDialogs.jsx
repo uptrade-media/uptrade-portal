@@ -1,8 +1,9 @@
 /**
  * ReputationOAuthDialogs - OAuth connection dialogs for review platforms
- * Styled to match Commerce module dialogs exactly
+ * Google uses unified OAuth (same as Files/SEO/Broadcast); after sign-in
+ * user may need to select a specific business location/property.
  */
-import { useState } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -15,8 +16,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, AlertCircle, ExternalLink, Key, Star, CheckCircle2 } from 'lucide-react'
-import { reputationApi, getPortalApiUrl } from '@/lib/portal-api'
+import { Loader2, AlertCircle, ExternalLink, Key, Star, CheckCircle2, MapPin } from 'lucide-react'
+import { reputationApi, getPortalApiUrl, oauthApi } from '@/lib/portal-api'
 import { toast } from 'sonner'
 
 // Platform configuration
@@ -71,151 +72,210 @@ const PLATFORM_CONFIG = {
   },
 }
 
-// Google OAuth Dialog
+const POPUP_WIDTH = 520
+const POPUP_HEIGHT = 600
+
+// Google OAuth Dialog – uses unified OAuth with popup (same as GSC).
+// Opens OAuth in a popup (no full-page redirect). Listens for postMessage from
+// the callback so the connection is completed and the UI updates without leaving the page.
 export function GoogleOAuthDialog({ open, onOpenChange, projectId, onSuccess }) {
-  const [isConnecting, setIsConnecting] = useState(false)
-  const [error, setError] = useState(null)
-  const [placeId, setPlaceId] = useState('')
-  const [businessName, setBusinessName] = useState('')
+  const [status, setStatus] = useState('idle') // 'idle' | 'opening' | 'waiting' | 'success' | 'error'
+  const [errorMessage, setErrorMessage] = useState(null)
+  const popupRef = useRef(null)
+  const messageHandlerRef = useRef(null)
+  const intervalRef = useRef(null)
   const config = PLATFORM_CONFIG.google
 
-  const handleConnect = async () => {
-    if (!placeId.trim()) {
-      setError('Please enter a Google Place ID')
+  const cleanup = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    if (messageHandlerRef.current && typeof window !== 'undefined') {
+      window.removeEventListener('message', messageHandlerRef.current)
+      messageHandlerRef.current = null
+    }
+    if (popupRef.current && !popupRef.current.closed) {
+      try { popupRef.current.close() } catch (_) {}
+      popupRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) {
+      cleanup()
+      setStatus('idle')
+      setErrorMessage(null)
+    }
+  }, [open, cleanup])
+
+  useEffect(() => {
+    return () => cleanup()
+  }, [cleanup])
+
+  const handleOpenPopup = useCallback(async () => {
+    if (!projectId) {
+      setErrorMessage('Select a project first')
+      setStatus('error')
       return
     }
-    
-    setError(null)
-    setIsConnecting(true)
-    
+    setStatus('opening')
+    setErrorMessage(null)
     try {
-      // Connect using Place ID (uses Places API - no OAuth needed)
-      const response = await reputationApi.connectPlatform(projectId, {
-        platformType: 'google',
-        externalPlaceId: placeId.trim(),
-        platformName: businessName.trim() || 'Google Business Profile',
-      })
-      
-      const result = response.data
-      
-      // Show appropriate success message based on sync result
-      if (result.synced && result.newReviews > 0) {
-        toast.success(`Google Business Profile connected! Synced ${result.newReviews} reviews.`)
-      } else if (result.synced) {
-        toast.success('Google Business Profile connected! No new reviews to sync.')
-      } else if (result.syncError) {
-        toast.warning(`Connected but sync failed: ${result.syncError}`)
-      } else {
-        toast.success('Google Business Profile connected!')
+      const returnUrl = window.location.origin + window.location.pathname
+      const res = await oauthApi.initiate('google', projectId, 'reputation', returnUrl, { popupMode: true })
+      const url = res?.url
+      if (!url || typeof url !== 'string' || !url.startsWith('https://accounts.google.com')) {
+        setErrorMessage(
+          'Could not get Google sign-in URL. The Portal API may be unreachable or OAuth is not configured.'
+        )
+        setStatus('error')
+        toast.error('Failed to start GBP connection')
+        return
       }
-      
-      onOpenChange(false)
-      onSuccess?.()
-    } catch (error) {
-      console.error('Failed to connect Google:', error)
-      setError(error.response?.data?.message || 'Failed to connect Google')
-    } finally {
-      setIsConnecting(false)
+      const left = Math.round((window.screen.width - POPUP_WIDTH) / 2)
+      const top = Math.round((window.screen.height - POPUP_HEIGHT) / 2)
+      const popup = window.open(
+        url,
+        'gbp-oauth',
+        `width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes`
+      )
+      popupRef.current = popup
+      if (!popup) {
+        setErrorMessage('Popup was blocked. Please allow popups for this site and try again.')
+        setStatus('error')
+        return
+      }
+      setStatus('waiting')
+
+      const handleMessage = (event) => {
+        if (event.source !== popup) return
+        const data = event.data
+        if (!data || typeof data !== 'object') return
+        if (data.type === 'oauth-success') {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current)
+            intervalRef.current = null
+          }
+          window.removeEventListener('message', messageHandlerRef.current)
+          messageHandlerRef.current = null
+          try { popup.close() } catch (_) {}
+          popupRef.current = null
+          setStatus('success')
+          toast.success('Google Business Profile connected')
+          onSuccess?.({
+            connectionId: data.connectionId,
+            selectLocation: data.selectLocation === true,
+          })
+          onOpenChange?.(false)
+        } else if (data.type === 'oauth-error') {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current)
+            intervalRef.current = null
+          }
+          window.removeEventListener('message', messageHandlerRef.current)
+          messageHandlerRef.current = null
+          setErrorMessage(data.error || 'Connection failed')
+          setStatus('error')
+          toast.error(data.error || 'Failed to connect GBP')
+        }
+      }
+
+      messageHandlerRef.current = handleMessage
+      window.addEventListener('message', handleMessage)
+
+      intervalRef.current = setInterval(() => {
+        if (popup.closed) {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current)
+            intervalRef.current = null
+          }
+          cleanup()
+          setStatus((s) => {
+            if (s === 'waiting') onOpenChange?.(false)
+            return 'idle'
+          })
+        }
+      }, 500)
+    } catch (err) {
+      console.error('Connect GBP failed:', err)
+      setErrorMessage(err.response?.data?.message || err.message || 'Failed to start connection')
+      setStatus('error')
+      toast.error('Failed to connect GBP')
     }
-  }
+  }, [projectId, onSuccess, onOpenChange, cleanup])
+
+  const handleClose = useCallback(() => {
+    cleanup()
+    setStatus('idle')
+    setErrorMessage(null)
+    onOpenChange?.(false)
+  }, [cleanup, onOpenChange])
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
+      <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => status === 'waiting' && e.preventDefault()}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span className="text-2xl">{config.icon}</span>
             Connect {config.name}
           </DialogTitle>
           <DialogDescription>
-            Connect using your Google Place ID to sync reviews automatically.
+            {status === 'idle' && 'We\'ll open a popup to connect your Google Business Profile. No full-page redirect.'}
+            {status === 'opening' && 'Opening Google sign-in...'}
+            {status === 'waiting' && 'Complete the sign-in in the popup window. You can leave this dialog open.'}
+            {status === 'success' && 'Connected! Refreshing your data.'}
+            {status === 'error' && (errorMessage || 'Something went wrong.')}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="placeId">Google Place ID *</Label>
-              <Input
-                id="placeId"
-                placeholder="ChIJ..."
-                value={placeId}
-                onChange={(e) => setPlaceId(e.target.value)}
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Find your Place ID at{' '}
-                <a 
-                  href="https://developers.google.com/maps/documentation/places/web-service/place-id" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="underline"
-                  style={{ color: 'var(--brand-primary)' }}
-                >
-                  Google's Place ID Finder
-                </a>
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="businessName">Business Name (optional)</Label>
-              <Input
-                id="businessName"
-                placeholder="Your Business Name"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-              />
-            </div>
-            
-            <div 
-              className="p-4 rounded-lg space-y-2"
-              style={{ backgroundColor: `${config.color}10` }}
-            >
-              <p className="text-sm font-medium">What we'll sync:</p>
-              <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
-                <li>All public reviews and ratings</li>
-                <li>Review text and author info</li>
-                <li>New reviews automatically</li>
-              </ul>
-              <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-[var(--glass-border)]">
-                Note: Responding to reviews requires full GBP API access (coming soon)
-              </p>
-            </div>
+        {status === 'idle' && (
+          <div
+            className="p-4 rounded-lg space-y-2"
+            style={{ backgroundColor: `${config.color}10` }}
+          >
+            <p className="text-sm font-medium flex items-center gap-2">
+              <MapPin className="h-4 w-4" style={{ color: config.color }} />
+              What happens next
+            </p>
+            <ul className="text-sm text-muted-foreground space-y-1 ml-4 list-disc">
+              <li>A popup will open for Google sign-in</li>
+              <li>If you have multiple business locations, you&apos;ll pick which one to connect</li>
+              <li>Reviews from that location will sync here</li>
+            </ul>
           </div>
-        </div>
+        )}
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isConnecting}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleConnect}
-            disabled={isConnecting || !placeId.trim()}
-            style={{ backgroundColor: 'var(--brand-primary)', color: 'white' }}
-          >
-            {isConnecting ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Connecting...
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4 mr-2" />
-                Connect {config.name}
-              </>
-            )}
-          </Button>
+        {status === 'error' && (
+          <div className="flex items-center gap-2 rounded-lg bg-destructive/10 text-destructive px-3 py-2 text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          {status === 'error' && (
+            <Button variant="outline" onClick={handleOpenPopup}>Try again</Button>
+          )}
+          {status !== 'waiting' && status !== 'opening' && (
+            <Button variant="ghost" onClick={handleClose}>
+              {status === 'success' ? 'Close' : 'Cancel'}
+            </Button>
+          )}
+          {status === 'idle' && (
+            <Button 
+              onClick={handleOpenPopup}
+              style={{ backgroundColor: 'var(--brand-primary)', color: 'white' }}
+            >
+              Continue with Google
+            </Button>
+          )}
+          {(status === 'opening' || status === 'waiting') && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{status === 'opening' ? 'Opening...' : 'Waiting for approval...'}</span>
+            </div>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -235,7 +295,8 @@ export function FacebookOAuthDialog({ open, onOpenChange, projectId, onSuccess }
     try {
       // Redirect to Facebook OAuth flow
       const apiUrl = getPortalApiUrl()
-      window.location.href = `${apiUrl}/reputation/oauth/facebook/authorize?project_id=${projectId}`
+      const returnUrl = encodeURIComponent(window.location.href)
+      window.location.href = `${apiUrl}/reputation/platforms/oauth/initiate/facebook?projectId=${projectId}&returnUrl=${returnUrl}`
     } catch (error) {
       console.error('Failed to initiate Facebook OAuth:', error)
       setError(error.response?.data?.message || 'Failed to connect Facebook')
@@ -331,7 +392,8 @@ export function TrustpilotOAuthDialog({ open, onOpenChange, projectId, onSuccess
     try {
       // Redirect to Trustpilot OAuth flow
       const apiUrl = getPortalApiUrl()
-      window.location.href = `${apiUrl}/reputation/oauth/trustpilot/authorize?project_id=${projectId}`
+      const returnUrl = encodeURIComponent(window.location.href)
+      window.location.href = `${apiUrl}/reputation/platforms/oauth/initiate/trustpilot?projectId=${projectId}&returnUrl=${returnUrl}`
     } catch (error) {
       console.error('Failed to initiate Trustpilot OAuth:', error)
       setError(error.response?.data?.message || 'Failed to connect Trustpilot')
@@ -575,7 +637,9 @@ export function ConnectPlatformsDialog({ open, onOpenChange, projectId, platform
         return platformKey // Signal to parent to open Yelp dialog
       }
       // For OAuth platforms, redirect
-      window.location.href = `${reputationApi.defaults?.baseURL || '/api'}/reputation/oauth/${platformKey}/authorize/${projectId}`
+      const apiUrl = reputationApi.defaults?.baseURL || '/api'
+      const returnUrl = encodeURIComponent(window.location.href)
+      window.location.href = `${apiUrl}/reputation/platforms/oauth/initiate/${platformKey}?projectId=${projectId}&returnUrl=${returnUrl}`
     } catch (error) {
       console.error('Failed to connect:', error)
     } finally {

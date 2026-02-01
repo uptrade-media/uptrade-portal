@@ -9,7 +9,7 @@
  * - Keyword highlighting
  * - A/B variant testing
  */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,17 +36,29 @@ const DESC_MOBILE_LIMIT = 120 // chars
 // Character to pixel ratio (approximate)
 const CHAR_TO_PIXEL = 10
 
+// Normalize page metadata from API (snake_case) or legacy (camelCase)
+const getPageTitle = (p) => p?.managed_title ?? p?.managedTitle ?? p?.title ?? ''
+const getPageDescription = (p) => p?.managed_meta_description ?? p?.managedMetaDescription ?? p?.meta_description ?? p?.metaDescription ?? ''
+
 export default function SEOSerpPreview({ 
   page,
   onSave,
   targetKeyword = '',
-  showVariants = false
+  showVariants = false,
+  /** Project/site domain (e.g. nkylawfirm.com) for URL preview; uses page.url host when absent */
+  domain: domainProp
 }) {
-  const [title, setTitle] = useState(page?.managedTitle || page?.title || '')
-  const [description, setDescription] = useState(page?.managedMetaDescription || page?.metaDescription || '')
+  const [title, setTitle] = useState(getPageTitle(page))
+  const [description, setDescription] = useState(getPageDescription(page))
   const [previewMode, setPreviewMode] = useState('desktop')
   const [variants, setVariants] = useState([])
   const [isDirty, setIsDirty] = useState(false)
+
+  // Sync from page when it changes (e.g. after save or refetch)
+  useEffect(() => {
+    setTitle(getPageTitle(page))
+    setDescription(getPageDescription(page))
+  }, [page?.managed_title, page?.managed_meta_description, page?.title, page?.meta_description])
 
   // Calculate character limits based on mode
   const titleLimit = previewMode === 'desktop' ? 60 : TITLE_MOBILE_LIMIT
@@ -109,22 +121,41 @@ export default function SEOSerpPreview({
     return text.replace(regex, '<mark class="bg-yellow-200 text-yellow-900">$1</mark>')
   }
 
-  // Generate URL preview
+  // Generate URL preview (guard against invalid or relative URLs; use project domain when provided)
   const urlPreview = useMemo(() => {
-    const url = page?.url || 'https://uptrademedia.com' + (page?.path || '/example-page/')
-    const urlObj = new URL(url)
+    const path = page?.path || '/example-page/'
+    const pathNorm = path.startsWith('/') ? path : `/${path}`
+    const isAbsolute = page?.url && (page.url.startsWith('http://') || page.url.startsWith('https://'))
+    let baseHost = domainProp
+    if (!baseHost && isAbsolute) {
+      try {
+        baseHost = new URL(page.url).hostname
+      } catch {
+        baseHost = null
+      }
+    }
+    const base = baseHost ? `https://${baseHost.replace(/^(https?:\/\/)?(www\.)?/, '')}` : 'https://uptrademedia.com'
+    const urlStr = isAbsolute ? page.url : `${base}${pathNorm}`
+    let urlObj
+    try {
+      urlObj = new URL(urlStr)
+    } catch {
+      urlObj = new URL(`${base}/`)
+    }
     const breadcrumbs = urlObj.pathname.split('/').filter(Boolean)
     return {
       domain: urlObj.hostname,
-      breadcrumbs: breadcrumbs.length > 2 
+      breadcrumbs: breadcrumbs.length > 2
         ? [breadcrumbs[0], '...', breadcrumbs[breadcrumbs.length - 1]]
         : breadcrumbs
     }
-  }, [page])
+  }, [page, domainProp])
 
   const handleSave = () => {
     if (onSave) {
       onSave({
+        managed_title: title,
+        managed_meta_description: description,
         managedTitle: title,
         managedMetaDescription: description
       })
@@ -133,8 +164,8 @@ export default function SEOSerpPreview({
   }
 
   const handleReset = () => {
-    setTitle(page?.title || '')
-    setDescription(page?.metaDescription || '')
+    setTitle(getPageTitle(page))
+    setDescription(getPageDescription(page))
     setIsDirty(false)
   }
 

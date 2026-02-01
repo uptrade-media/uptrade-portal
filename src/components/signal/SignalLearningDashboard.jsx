@@ -49,7 +49,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Progress } from '@/components/ui/progress'
-import { useSignalStore } from '@/lib/signal-store'
+import { useSignalStore } from '@/lib/signal-store' // Keep for streaming UI state
+import { useSignalSuggestions, signalKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 
 // Suggestion type configuration

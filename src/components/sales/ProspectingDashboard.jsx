@@ -41,7 +41,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import useCrmStore from '@/lib/crm-store'
+import { useTargetCompanies, useClaimTargetCompany } from '@/lib/hooks'
 import useAuthStore from '@/lib/auth-store'
 import TargetCompanyCard from './TargetCompanyCard'
 import TargetCompanyDetail from './TargetCompanyDetail'
@@ -84,22 +84,23 @@ const DEFAULT_SCAN_PARAMS = {
 
 export default function ProspectingDashboard() {
   const { user } = useAuthStore()
+  
+  // Fetch prospecting companies
   const { 
-    targetCompanies, 
-    targetCompaniesLoading, 
-    targetCompaniesError,
-    selectedTargetCompany,
-    fetchTargetCompanies, 
-    claimTargetCompany, 
-    getCallPrep,
-    setSelectedTargetCompany 
-  } = useCrmStore()
-
-  // Filter only prospecting-sourced companies
-  const prospectingCompanies = useMemo(() => 
-    targetCompanies.filter(c => c.source === 'radar' || c.source === 'prospecting'),
-    [targetCompanies]
-  )
+    data: companiesData, 
+    isLoading: targetCompaniesLoading, 
+    error: targetCompaniesError,
+    refetch: refetchTargetCompanies
+  } = useTargetCompanies({ source: 'radar' })
+  
+  const targetCompanies = companiesData?.companies || []
+  const prospectingCompanies = targetCompanies
+  
+  // Claim mutation
+  const claimMutation = useClaimTargetCompany()
+  
+  // Selected company state
+  const [selectedTargetCompany, setSelectedTargetCompany] = useState(null)
 
   // Filters & sorting state
   const [searchQuery, setSearchQuery] = useState('')
@@ -113,11 +114,6 @@ export default function ProspectingDashboard() {
   const [scanParams, setScanParams] = useState(DEFAULT_SCAN_PARAMS)
   const [isScanning, setIsScanning] = useState(false)
   const [lastScanAt, setLastScanAt] = useState(null)
-
-  // Load prospecting companies on mount
-  useEffect(() => {
-    fetchTargetCompanies({ source: 'radar' })
-  }, [fetchTargetCompanies])
 
   // Filter and sort companies
   const filteredCompanies = useMemo(() => {
@@ -178,7 +174,7 @@ export default function ProspectingDashboard() {
 
   const handleClaim = async (companyId) => {
     try {
-      await claimTargetCompany(companyId)
+      await claimMutation.mutateAsync({ id: companyId })
       toast.success('Company claimed!')
     } catch (err) {
       toast.error('Failed to claim company')
@@ -187,16 +183,16 @@ export default function ProspectingDashboard() {
 
   const handleCallPrep = async (companyId) => {
     try {
-      await getCallPrep(companyId)
-      toast.success('Call prep generated!')
+      // TODO: Add getCallPrep hook when CRM is fully migrated
+      toast.info('Call prep generation coming soon')
     } catch (err) {
       toast.error('Failed to generate call prep')
     }
   }
 
   const handleRefresh = useCallback(() => {
-    fetchTargetCompanies({ source: 'radar' })
-  }, [fetchTargetCompanies])
+    refetchTargetCompanies()
+  }, [refetchTargetCompanies])
 
   const clearFilters = () => {
     setSearchQuery('')

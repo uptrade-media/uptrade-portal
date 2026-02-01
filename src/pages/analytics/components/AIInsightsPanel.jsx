@@ -2,7 +2,7 @@
 // AI-powered analytics insights panel
 // Shows Signal AI-generated insights for the current analytics view
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -25,7 +25,7 @@ import {
   BarChart3,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import useAnalyticsStore from '@/lib/analytics-store'
+import { useAiInsights, useGenerateAiInsights } from '@/lib/hooks'
 import useAuthStore from '@/lib/auth-store'
 
 // Icon mapping for insight types
@@ -133,22 +133,28 @@ function TopPagesList({ pages }) {
 
 export default function AIInsightsPanel({ path, onClose, fullPage = false }) {
   const { currentProject } = useAuthStore()
-  const { aiInsights, aiInsightsLoading, aiInsightsError, fetchAIInsights } = useAnalyticsStore()
+  
+  // Use React Query for AI insights
+  const { 
+    data: aiInsights, 
+    isLoading: aiInsightsLoading, 
+    error: aiInsightsError,
+    refetch 
+  } = useAiInsights(currentProject?.id)
+  
+  const generateMutation = useGenerateAiInsights()
   
   const [isRefreshing, setIsRefreshing] = useState(false)
-  
-  // Fetch insights on mount
-  useEffect(() => {
-    if (currentProject?.id) {
-      fetchAIInsights(currentProject.id, path)
-    }
-  }, [currentProject?.id, path, fetchAIInsights])
   
   const handleRefresh = async () => {
     if (!currentProject?.id) return
     setIsRefreshing(true)
-    await fetchAIInsights(currentProject.id, path)
-    setIsRefreshing(false)
+    try {
+      await generateMutation.mutateAsync(currentProject.id)
+      await refetch()
+    } finally {
+      setIsRefreshing(false)
+    }
   }
   
   const insights = aiInsights?.insights || []

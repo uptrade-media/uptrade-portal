@@ -1,7 +1,8 @@
 // src/components/seo/SEOAIInsights.jsx
 // AI-powered SEO insights and recommendations
 // Shows training status, knowledge base, and actionable recommendations
-import { useState, useEffect } from 'react'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useSignalAccess } from '@/lib/signal-access'
 import SignalUpgradeCard from './signal/SignalUpgradeCard'
@@ -32,10 +33,14 @@ import {
   Users,
   Tag
 } from 'lucide-react'
-import { useSeoStore, selectPendingRecommendations, selectHighImpactRecommendations, selectAutoFixableRecommendations } from '@/lib/seo-store'
+import { useSeoAiRecommendations, useSeoAiInsights, useGenerateAiInsights, useUpdateSeoOpportunity } from '@/hooks/seo'
+import { seoApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
+import { seoContentKeys } from '@/hooks/seo'
 
 export default function SEOAIInsights({ site, projectId, onSelectPage }) {
   const { hasAccess: hasSignalAccess } = useSignalAccess()
+  const queryClient = useQueryClient()
 
   // Show upgrade prompt if no Signal access
   if (!hasSignalAccess) {
@@ -46,47 +51,35 @@ export default function SEOAIInsights({ site, projectId, onSelectPage }) {
     )
   }
 
-  const {
-    aiRecommendations,
-    aiRecommendationsLoading,
-    aiRecommendationsError,
-    siteKnowledge,
-    siteKnowledgeLoading,
-    aiTrainingStatus,
-    aiAnalysisInProgress,
-    trainSite,
-    fetchProjectKnowledge,
-    runAiBrain,
-    fetchAiRecommendations,
-    applyRecommendation,
-    applyRecommendations,
-    dismissRecommendation
-  } = useSeoStore()
+  // Use projectId directly (new architecture) or fallback to site.id (legacy)
+  const siteId = projectId || site?.id
+
+  // React Query hooks
+  const { data: recommendationsData, isLoading: aiRecommendationsLoading, error: aiRecommendationsError } = useSeoAiRecommendations(siteId)
+  const { data: knowledgeData, isLoading: siteKnowledgeLoading } = useSeoAiInsights(siteId)
+  const generateInsightsMutation = useGenerateAiInsights()
+  const updateOpportunityMutation = useUpdateSeoOpportunity()
+  
+  // Extract data - normalize to array so .filter/.length never throw
+  const raw = recommendationsData?.recommendations ?? recommendationsData
+  const recommendations = Array.isArray(raw) ? raw : []
+  const siteKnowledge = knowledgeData?.knowledge || knowledgeData || {}
+  const aiTrainingStatus = knowledgeData?.trainingStatus || 'idle'
+  const aiAnalysisInProgress = generateInsightsMutation.isLoading
 
   const [activeTab, setActiveTab] = useState('recommendations')
   const [applying, setApplying] = useState({})
   const [batchApplying, setBatchApplying] = useState(false)
 
-  // Use projectId directly (new architecture) or fallback to site.id (legacy)
-  const siteId = projectId || site?.id
-
-  // Fetch knowledge and recommendations on mount
-  useEffect(() => {
-    if (siteId) {
-      fetchProjectKnowledge(siteId)
-      fetchAiRecommendations(siteId)
-    }
-  }, [site?.id])
-
-  // Derived data - ensure aiRecommendations is an array
-  const recommendations = Array.isArray(aiRecommendations) ? aiRecommendations : []
+  // Derived data from recommendations (always an array)
   const pendingRecs = recommendations.filter(r => r.status === 'pending')
   const highImpactRecs = pendingRecs.filter(r => r.impact === 'high' || r.impact === 'critical')
   const autoFixableRecs = pendingRecs.filter(r => r.auto_fixable)
 
   const handleTrainSite = async () => {
     try {
-      await trainSite(site.id)
+      await seoApi.trainSite(siteId)
+      queryClient.invalidateQueries({ queryKey: seoContentKeys.aiInsights(siteId) })
     } catch (error) {
       console.error('Training failed:', error)
     }
@@ -94,7 +87,7 @@ export default function SEOAIInsights({ site, projectId, onSelectPage }) {
 
   const handleRunAnalysis = async () => {
     try {
-      await runAiBrain(site.id, { analysisType: 'comprehensive' })
+      await generateInsightsMutation.mutateAsync(siteId)
     } catch (error) {
       console.error('Analysis failed:', error)
     }
@@ -103,7 +96,8 @@ export default function SEOAIInsights({ site, projectId, onSelectPage }) {
   const handleApply = async (recId) => {
     setApplying(prev => ({ ...prev, [recId]: true }))
     try {
-      await applyRecommendation(recId)
+      await seoApi.applyRecommendation(recId)
+      queryClient.invalidateQueries({ queryKey: seoContentKeys.aiRecommendations(siteId) })
     } catch (error) {
       console.error('Apply failed:', error)
     } finally {
@@ -113,7 +107,8 @@ export default function SEOAIInsights({ site, projectId, onSelectPage }) {
 
   const handleDismiss = async (recId) => {
     try {
-      await dismissRecommendation(recId)
+      await seoApi.dismissRecommendation(recId)
+      queryClient.invalidateQueries({ queryKey: seoContentKeys.aiRecommendations(siteId) })
     } catch (error) {
       console.error('Dismiss failed:', error)
     }
@@ -125,7 +120,8 @@ export default function SEOAIInsights({ site, projectId, onSelectPage }) {
     
     setBatchApplying(true)
     try {
-      await applyRecommendations(autoFixIds)
+      await Promise.all(autoFixIds.map(id => seoApi.applyRecommendation(id)))
+      queryClient.invalidateQueries({ queryKey: seoContentKeys.aiRecommendations(siteId) })
     } catch (error) {
       console.error('Batch apply failed:', error)
     } finally {
@@ -309,7 +305,7 @@ export default function SEOAIInsights({ site, projectId, onSelectPage }) {
               <div>
                 <p className="text-xs text-muted-foreground">Applied</p>
                 <p className="text-2xl font-bold text-foreground">
-                  {aiRecommendations.filter(r => r.status === 'applied').length}
+                  {recommendations.filter(r => r.status === 'applied').length}
                 </p>
               </div>
               <CheckCircle className="h-8 w-8 text-green-400/50" />

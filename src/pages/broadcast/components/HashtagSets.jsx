@@ -1,5 +1,5 @@
 // src/pages/broadcast/components/HashtagSets.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Hash,
   Plus,
@@ -34,7 +34,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useBroadcastStore } from '@/stores/broadcastStore';
+import { EmptyState } from '@/components/EmptyState';
+import { 
+  useBroadcastHashtagSets,
+  useCreateBroadcastHashtagSet,
+  useUpdateBroadcastHashtagSet,
+  useDeleteBroadcastHashtagSet,
+} from '@/lib/hooks';
 import useAuthStore from '@/lib/auth-store';
 import { PlatformIcon } from './PlatformIcon';
 import { toast } from 'sonner';
@@ -349,24 +355,15 @@ export function HashtagSets({ onSelectHashtags }) {
   const { currentProject } = useAuthStore();
   const projectId = currentProject?.id;
 
-  const {
-    hashtagSets,
-    hashtagSetsLoading,
-    fetchHashtagSets,
-    createHashtagSet,
-    deleteHashtagSet,
-  } = useBroadcastStore();
+  const { data: hashtagSets = [], isLoading: hashtagSetsLoading } = useBroadcastHashtagSets(projectId);
+  const createHashtagSetMutation = useCreateBroadcastHashtagSet();
+  const updateHashtagSetMutation = useUpdateBroadcastHashtagSet();
+  const deleteHashtagSetMutation = useDeleteBroadcastHashtagSet();
 
   const [showEditor, setShowEditor] = useState(false);
   const [editingSet, setEditingSet] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
-
-  useEffect(() => {
-    if (projectId) {
-      fetchHashtagSets(projectId);
-    }
-  }, [projectId, fetchHashtagSets]);
 
   const handleCreate = () => {
     setEditingSet(null);
@@ -380,10 +377,10 @@ export function HashtagSets({ onSelectHashtags }) {
 
   const handleSave = async (data) => {
     if (editingSet) {
-      // Update existing - would need updateHashtagSet in store
-      toast.info('Update not implemented yet');
+      await updateHashtagSetMutation.mutateAsync({ id: editingSet.id, projectId, data });
+      toast.success('Hashtag set updated!');
     } else {
-      await createHashtagSet(projectId, data);
+      await createHashtagSetMutation.mutateAsync({ projectId, data });
       toast.success('Hashtag set created!');
     }
     setShowEditor(false);
@@ -391,7 +388,7 @@ export function HashtagSets({ onSelectHashtags }) {
   };
 
   const handleDelete = async (setId) => {
-    await deleteHashtagSet(setId);
+    await deleteHashtagSetMutation.mutateAsync({ id: setId, projectId });
   };
 
   const handleCopy = (set) => {
@@ -458,20 +455,13 @@ export function HashtagSets({ onSelectHashtags }) {
           <Loader2 className="h-6 w-6 animate-spin text-[var(--brand-primary)]" />
         </div>
       ) : filteredSets.length === 0 ? (
-        <div className="flex h-64 flex-col items-center justify-center rounded-lg border-2 border-dashed border-[var(--glass-border)] bg-[var(--surface-secondary)]/50">
-          <Tag className="mb-2 h-12 w-12 text-[var(--text-tertiary)]" />
-          <h3 className="font-medium text-[var(--text-primary)]">No hashtag sets yet</h3>
-          <p className="mb-4 text-sm text-[var(--text-tertiary)]">
-            Create reusable hashtag collections for quick access
-          </p>
-          <Button
-            onClick={handleCreate}
-            className="bg-gradient-to-r from-[var(--brand-primary)] to-[var(--brand-secondary)] text-white hover:opacity-90"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Create Your First Set
-          </Button>
-        </div>
+        <EmptyState
+          icon={Tag}
+          title="No hashtag sets yet"
+          description="Create reusable hashtag collections for quick access"
+          actionLabel="Create Your First Set"
+          onAction={handleCreate}
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredSets.map((set) => (

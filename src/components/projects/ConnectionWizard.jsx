@@ -4,7 +4,7 @@
  * Guides users through connecting third-party platforms
  * to enable data syncing and AI features
  */
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { 
   ChevronRight, ChevronLeft, CheckCircle2, AlertCircle, 
   ExternalLink, Loader2, RefreshCw, Trash2, Settings,
@@ -27,14 +27,19 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 
+// Google Resource Selector (GSC + GBP combined)
+import GoogleResourceSelector from './GoogleResourceSelector'
+import { openOAuthPopup } from '@/lib/oauth-popup'
+
 // Platform configurations - Unified OAuth connections
-// A single Google auth grants access to GSC (SEO), GBP Reviews (Reputation), GBP Posts (Broadcast)
+// Google Business: GSC (SEO), GBP Reviews (Reputation), GBP Posts (Broadcast) - uses business connection type
+// Google Workspace: Gmail, Calendar, Contacts - uses workspace connection type (in Account Settings)
 // A single Facebook auth grants access to Page Posts (Broadcast), Page Reviews (Reputation), Instagram (Broadcast)
 const PLATFORM_CONFIGS = {
   google: {
     id: 'google',
-    name: 'Google',
-    description: 'Connect your Google account for Search Console, Business Profile, and more',
+    name: 'Google Business',
+    description: 'Connect your company Google account for Search Console & Business Profile',
     icon: Search,
     color: 'bg-blue-500',
     category: 'google',
@@ -43,8 +48,10 @@ const PLATFORM_CONFIGS = {
       'Search Console - SEO rankings & indexing',
       'Business Profile - Reviews & responses',
       'Business Profile - Posts & updates',
+      'Business Profile - Local SEO optimization',
     ],
-    modules: ['seo', 'reputation', 'broadcast'],
+    modules: ['seo', 'seo_gbp', 'reputation', 'broadcast'],
+    connectionType: 'business', // Business connection for GSC/GBP
     setupTime: '2 minutes',
     oauthProvider: 'google',
   },
@@ -319,58 +326,46 @@ function OAuthFlowDialog({
     setError(null)
 
     try {
-      // In real implementation, this would:
-      // 1. Call backend to get OAuth URL with state token
-      // 2. Open popup/redirect to OAuth provider
-      // 3. Handle callback and token exchange
-      
+      // Use popup-based OAuth via Portal API
       const portalApiUrl = import.meta.env.VITE_PORTAL_API_URL || ''
-      const oauthUrl = `${portalApiUrl}/integrations/oauth/${config.oauthProvider}/authorize?project_id=${projectId}&platform=${platform}`
+      const modulesParam = config.modules.join(',')
+      const connectionType = config.connectionType || 'business'
       
-      // Open OAuth popup
-      const width = 600
-      const height = 700
-      const left = (window.innerWidth - width) / 2
-      const top = (window.innerHeight - height) / 2
-      
-      const popup = window.open(
-        oauthUrl,
-        'oauth_popup',
-        `width=${width},height=${height},left=${left},top=${top}`
+      // Get OAuth URL from backend with popup mode
+      const response = await fetch(
+        `${portalApiUrl}/oauth/initiate/${config.oauthProvider}?` + 
+        `projectId=${projectId}&modules=${modulesParam}&connectionType=${connectionType}&popupMode=true`,
+        { credentials: 'include' }
       )
-
-      // Listen for callback message
-      const handleMessage = (event) => {
-        if (event.data?.type === 'oauth_callback') {
-          window.removeEventListener('message', handleMessage)
-          popup?.close()
-          
-          if (event.data.success) {
-            setProperties(event.data.properties || [])
-            setStep('select-property')
-          } else {
-            setError(event.data.error || 'Authentication failed')
-          }
-          setIsLoading(false)
-        }
+      
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.message || 'Failed to initiate OAuth')
       }
-
-      window.addEventListener('message', handleMessage)
-
-      // Check if popup was blocked
-      if (!popup || popup.closed) {
-        setError('Popup was blocked. Please allow popups for this site.')
-        setIsLoading(false)
-      }
-
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        window.removeEventListener('message', handleMessage)
-        if (step === 'intro') {
-          setIsLoading(false)
-          setError('Connection timed out. Please try again.')
+      
+      const { url } = await response.json()
+      
+      // Open OAuth in popup window
+      const result = await openOAuthPopup(url, `oauth-${config.oauthProvider}`)
+      
+      if (result.success) {
+        // Check if we need to show property/location selectors
+        if (result.selectProperty || result.selectLocation) {
+          // Close this dialog and trigger resource selection
+          onComplete?.(platform, {
+            connectionId: result.connectionId,
+            selectProperty: result.selectProperty,
+            selectLocation: result.selectLocation,
+          })
+        } else {
+          setStep('success')
+          onComplete?.(platform)
         }
-      }, 300000)
+      } else if (result.error !== 'OAuth window was closed') {
+        setError(result.error || 'Failed to connect')
+      }
+      
+      setIsLoading(false)
 
     } catch (err) {
       console.error('OAuth error:', err)
@@ -561,6 +556,56 @@ export default function ConnectionWizard({
   const [isConnecting, setIsConnecting] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState(null)
+  
+  // Google Resource Selector state (GSC + GBP)
+  const [isGoogleResourceSelectorOpen, setIsGoogleResourceSelectorOpen] = useState(false)
+  const [googleConnectionId, setGoogleConnectionId] = useState(null)
+  const [needsGscSelection, setNeedsGscSelection] = useState(false)
+  const [needsGbpSelection, setNeedsGbpSelection] = useState(false)
+
+  // Handle OAuth callback params (e.g., after Google OAuth returns)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const selectLocation = params.get('selectLocation')
+    const selectProperty = params.get('selectProperty')
+    const connId = params.get('connectionId')
+    const connected = params.get('connected')
+
+    // If we just connected Google and need property/location selection
+    if ((selectLocation === 'true' || selectProperty === 'true') && connId && connected === 'google') {
+      setGoogleConnectionId(connId)
+      setNeedsGscSelection(selectProperty === 'true')
+      setNeedsGbpSelection(selectLocation === 'true')
+      setIsGoogleResourceSelectorOpen(true)
+
+      // Clean up URL params
+      const url = new URL(window.location.href)
+      url.searchParams.delete('selectLocation')
+      url.searchParams.delete('selectProperty')
+      url.searchParams.delete('locationCount')
+      url.searchParams.delete('propertyCount')
+      url.searchParams.delete('connected')
+      url.searchParams.delete('connectionId')
+      url.searchParams.delete('modules')
+      window.history.replaceState({}, '', url.toString())
+
+      // Trigger connection refresh
+      onConnectionChange?.()
+    } else if (connected && connId) {
+      // Just connected but no location selection needed
+      toast.success(`Connected to ${PLATFORM_CONFIGS[connected]?.name || connected}!`)
+      
+      // Clean up URL params
+      const url = new URL(window.location.href)
+      url.searchParams.delete('connected')
+      url.searchParams.delete('connectionId')
+      url.searchParams.delete('modules')
+      window.history.replaceState({}, '', url.toString())
+
+      // Trigger connection refresh
+      onConnectionChange?.()
+    }
+  }, [onConnectionChange])
 
   // Create connection lookup
   const connectionMap = useMemo(() => {
@@ -643,10 +688,20 @@ export default function ConnectionWizard({
     }
   }, [projectId, onConnectionChange])
 
-  const handleOAuthComplete = useCallback((platform) => {
+  const handleOAuthComplete = useCallback((platform, result) => {
     setIsOAuthDialogOpen(false)
     setSelectedPlatform(null)
-    toast.success(`Connected to ${PLATFORM_CONFIGS[platform]?.name}!`)
+    
+    // If property/location selection is needed, open the selector
+    if (result?.connectionId && (result?.selectProperty || result?.selectLocation)) {
+      setGoogleConnectionId(result.connectionId)
+      setNeedsGscSelection(result.selectProperty === true)
+      setNeedsGbpSelection(result.selectLocation === true)
+      setIsGoogleResourceSelectorOpen(true)
+    } else {
+      toast.success(`Connected to ${PLATFORM_CONFIGS[platform]?.name}!`)
+    }
+    
     onConnectionChange?.()
   }, [onConnectionChange])
 
@@ -747,9 +802,27 @@ export default function ConnectionWizard({
         onComplete={handleOAuthComplete}
         projectId={projectId}
       />
+
+      {/* Google Resource Selector (GSC + GBP combined, shown after Google OAuth) */}
+      <GoogleResourceSelector
+        isOpen={isGoogleResourceSelectorOpen}
+        onClose={() => {
+          setIsGoogleResourceSelectorOpen(false)
+          setGoogleConnectionId(null)
+          setNeedsGscSelection(false)
+          setNeedsGbpSelection(false)
+        }}
+        connectionId={googleConnectionId}
+        needsGscSelection={needsGscSelection}
+        needsGbpSelection={needsGbpSelection}
+        onComplete={() => {
+          onConnectionChange?.()
+          toast.success('Google resources configured!')
+        }}
+      />
     </div>
   )
 }
 
 // Named exports
-export { PlatformCard, OAuthFlowDialog, PLATFORM_CONFIGS, CATEGORIES }
+export { PlatformCard, OAuthFlowDialog, PLATFORM_CONFIGS, CATEGORIES, GoogleResourceSelector }

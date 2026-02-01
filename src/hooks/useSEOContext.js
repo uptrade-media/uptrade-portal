@@ -1,13 +1,17 @@
 // src/hooks/useSEOContext.js
 // Unified context hook for SEO module components
-// Eliminates prop drilling and ensures consistent projectId access
+// Uses React Query hooks instead of Zustand stores
 import { useMemo } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
 import useAuthStore from '@/lib/auth-store'
+import { useSeoGSCOverview } from '@/hooks/seo/useSeoGSC'
+import { useSiteKnowledge } from '@/hooks/seo/useSeoSignal'
 
 /**
  * Provides consistent SEO context to all child components
  * Use this instead of passing projectId/site as props
+ * 
+ * Uses the current project from authStore (which is already being managed
+ * by the app's project switching logic) and React Query for data fetching.
  * 
  * @returns {Object} SEO context with:
  *   - projectId: string | null - The current site's UUID
@@ -20,12 +24,7 @@ import useAuthStore from '@/lib/auth-store'
  *   - orgDomain: string | null - Organization's domain (for GSC)
  */
 export function useSEOContext() {
-  const { currentOrg } = useAuthStore()
-  const { 
-    currentProject, 
-    projectsLoading, 
-    projectsError 
-  } = useSeoStore()
+  const { currentOrg, currentProject } = useAuthStore()
 
   return useMemo(() => ({
     // Core identifiers
@@ -33,10 +32,10 @@ export function useSEOContext() {
     site: currentProject,
     domain: currentProject?.domain ?? null,
     
-    // Status flags
+    // Status flags - projects are loaded via auth store
     isReady: !!currentProject?.id,
-    isLoading: projectsLoading,
-    error: projectsError,
+    isLoading: false, // Auth store handles loading
+    error: null,
     
     // Org context (for GSC which uses org domain)
     orgId: currentOrg?.id ?? null,
@@ -48,7 +47,7 @@ export function useSEOContext() {
     
     // Derived values
     sitemapUrl: currentProject?.sitemap_url ?? (currentProject?.domain ? `https://${currentProject.domain}/sitemap.xml` : null),
-  }), [currentProject, projectsLoading, projectsError, currentOrg])
+  }), [currentProject, currentOrg])
 }
 
 /**
@@ -56,8 +55,10 @@ export function useSEOContext() {
  * Determines which view to show (wizard, resume, or dashboard)
  */
 export function useSEOSetupStatus() {
-  const { site, isLoading, orgDomain, orgId } = useSEOContext()
-  const { siteKnowledge, siteKnowledgeLoading } = useSeoStore()
+  const { site, isLoading, orgDomain, orgId, projectId } = useSEOContext()
+  
+  // Fetch site knowledge status via React Query
+  const { data: siteKnowledge, isLoading: siteKnowledgeLoading } = useSiteKnowledge(projectId || '')
 
   return useMemo(() => {
     // Still loading
@@ -97,14 +98,18 @@ export function useSEOSetupStatus() {
  * Hook to get GSC connection status
  */
 export function useGSCStatus() {
-  const { site, orgDomain } = useSEOContext()
-  const { gscOverview, gscLoading, gscError } = useSeoStore()
+  const { site, orgDomain, projectId } = useSEOContext()
+  
+  // Fetch GSC overview via React Query
+  const { data: gscOverview, isLoading: gscLoading, error: gscError } = useSeoGSCOverview(projectId || '')
 
   return useMemo(() => {
     if (gscLoading) return { status: 'checking', connected: false }
-    if (gscError) return { status: 'error', connected: false, error: gscError }
+    if (gscError) return { status: 'error', connected: false, error: gscError.message }
     if (!site?.gsc_access_token) return { status: 'not-connected', connected: false }
-    if (gscOverview?.metrics) return { status: 'connected', connected: true, lastSync: site.gsc_last_sync_at }
+    if (gscOverview?.data?.metrics || gscOverview?.metrics) {
+      return { status: 'connected', connected: true, lastSync: site.gsc_last_sync_at }
+    }
     return { status: 'unknown', connected: false }
   }, [site, gscOverview, gscLoading, gscError])
 }

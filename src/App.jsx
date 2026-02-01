@@ -1,11 +1,25 @@
 // src/App.jsx
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, useState, useRef, lazy, Suspense } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Protected from './components/Protected'
 import { ThemeProvider } from './components/ThemeProvider'
 import useAuthStore from './lib/auth-store'
 import UptradeLoading from './components/UptradeLoading'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './App.css'
+
+// Create a client with sensible defaults
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // 5 minutes
+      gcTime: 1000 * 60 * 30, // 30 minutes (formerly cacheTime)
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+})
 
 // Eager load critical routes (login, dashboard)
 import LoginPage from './pages/LoginPage'
@@ -17,40 +31,12 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const AccountSetup = lazy(() => import('./pages/AccountSetup'))
 const ProposalGate = lazy(() => import('./components/ProposalGate'))
 const AuditGate = lazy(() => import('./components/AuditGate'))
-const Audits = lazy(() => import('./pages/Audits'))
-const AuditDetail = lazy(() => import('./pages/AuditDetail'))
-const UserProfile = lazy(() => import('./pages/UserProfile'))
 const AuthCallback = lazy(() => import('./pages/AuthCallback'))
 const SiteKitAuth = lazy(() => import('./pages/SiteKitAuth'))
 const InvoicePayment = lazy(() => import('./pages/InvoicePayment'))
 
-// SEO Module
-const SEOModule = lazy(() => import('./pages/seo/SEOModule'))
-
-// Commerce Module - Unified products, services, classes, events, sales, customers
-const CommerceModule = lazy(() => import('./pages/commerce/CommerceModule'))
-
-// Legacy Ecommerce Module (redirects to Commerce)
-const EcommerceModule = lazy(() => import('./pages/ecommerce/EcommerceModule'))
-
-// Engage Module - Live chat and conversion optimization
-const Engage = lazy(() => import('./pages/Engage'))
-
-// Reputation Module
-const ReputationModule = lazy(() => import('./pages/reputation/ReputationModule'))
-
-// Customers Module - Post-sale customer management
-const CustomersModule = lazy(() => import('./pages/customers/CustomersModule'))
-
-// Broadcast Module - Social media management
-const Broadcast = lazy(() => import('./pages/broadcast'))
-
-// Sync Module - Calendar management and booking
-const SyncModule = lazy(() => import('./pages/sync'))
+// Sync OAuth Callback (standalone route; main sync UI is in MainLayout via components/sync)
 const SyncOAuthCallback = lazy(() => import('./pages/sync/SyncOAuthCallback'))
-
-// Client SEO Dashboard (tenant-facing, read-only)
-const ClientSEODashboard = lazy(() => import('./pages/client/ClientSEODashboard'))
 
 export default function App() {
   const { isAuthenticated, checkAuth, isLoading } = useAuthStore()
@@ -67,30 +53,35 @@ export default function App() {
     }
   }
 
-  // Check authentication on app mount (only once)
+  // Check authentication on app mount (only once).
+  // When authenticated, preload the dashboard chunk so we don't show a second loader
+  // (MainLayout's Suspense fallback) — one continuous loading state.
   useEffect(() => {
     if (hasCheckedAuthRef.current) return
-    
-    console.log('[App] Checking authentication on app mount');
+
     hasCheckedAuthRef.current = true
-    
+
     const checkAuthOnce = async () => {
       try {
-        const result = await checkAuth();
-        console.log('[App] Initial auth check result:', result);
+        const result = await checkAuth()
+        // If user is authenticated, preload the default dashboard module(s) so
+        // MainLayout won't suspend and show a second loading state
+        if (result?.success) {
+          await Promise.all([
+            import('./components/dashboard/DashboardModule'),
+            import('./components/dashboard/RepDashboardModule'),
+          ])
+        }
       } catch (error) {
-        console.error('[App] Error during initial auth check:', error);
+        console.error('[App] Error during initial auth check:', error)
       } finally {
-        setInitialized(true);
-        // Wait a tiny bit for React to render, then hide loader
-        requestAnimationFrame(() => {
-          hideInitialLoader()
-        })
+        setInitialized(true)
+        requestAnimationFrame(() => hideInitialLoader())
       }
-    };
-    
-    checkAuthOnce();
-  }, []) // Empty dependency array - only run once on mount
+    }
+
+    checkAuthOnce()
+  }, [])
 
   // Don't show anything while initializing - the HTML loader is still visible
   if (!initialized) {
@@ -98,11 +89,13 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider>
-      <Router>
-        <div className="h-full bg-[var(--surface-page)] transition-colors duration-300">
-          <Suspense fallback={<UptradeLoading />}>
-            <Routes>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <Router>
+          <div className="h-full bg-[var(--surface-page)] transition-colors duration-300">
+            <ErrorBoundary>
+              <Suspense fallback={<UptradeLoading />}>
+                <Routes>
               <Route 
                 path="/" 
                 element={isAuthenticated ? <Protected><Dashboard /></Protected> : <Navigate to="/login" replace />} 
@@ -120,16 +113,6 @@ export default function App() {
               {/* Sync OAuth Callback - must be standalone */}
               <Route path="/sync/callback" element={<SyncOAuthCallback />} />
               
-              {/* Client SEO Dashboard - Tenant-facing read-only view (standalone) */}
-              <Route
-                path="/client/seo"
-                element={
-                  <Protected>
-                    <ClientSEODashboard />
-                  </Protected>
-                }
-              />
-              
               {/* ALL authenticated routes go through MainLayout for persistent sidebar/header */}
               <Route
                 path="/*"
@@ -140,10 +123,12 @@ export default function App() {
                 }
               />
 
-            </Routes>
-          </Suspense>
+                </Routes>
+              </Suspense>
+            </ErrorBoundary>
         </div>
       </Router>
     </ThemeProvider>
+    </QueryClientProvider>
   )
 }

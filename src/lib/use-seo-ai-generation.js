@@ -58,12 +58,12 @@ export function useSEOAIGeneration() {
     
     try {
       const result = await skillsApi.invoke('seo', 'generate-titles', {
-        project_id: currentProject?.id,
-        page_url: pageUrl,
-        current_title: currentTitle,
+        projectId: currentProject?.id,
+        pageUrl: pageUrl,
+        currentTitle,
         h1,
-        meta_description: metaDescription,
-        target_keywords: targetKeywords,
+        metaDescription,
+        targetKeywords,
         count
       })
       
@@ -142,13 +142,13 @@ export function useSEOAIGeneration() {
     
     try {
       const result = await skillsApi.invoke('seo', 'generate-meta-descriptions', {
-        project_id: currentProject?.id,
-        page_url: pageUrl,
-        current_meta: currentMeta,
+        projectId: currentProject?.id,
+        pageUrl: pageUrl,
+        currentMeta,
         title,
         h1,
-        page_content: pageContent?.substring(0, 500), // Limit content length
-        target_keywords: targetKeywords,
+        pageContent: pageContent?.substring(0, 500), // Limit content length
+        targetKeywords,
         count
       })
       
@@ -223,11 +223,11 @@ export function useSEOAIGeneration() {
     
     try {
       const result = await skillsApi.invoke('seo', 'generate-h1s', {
-        project_id: currentProject?.id,
-        page_url: pageUrl,
-        current_h1: currentH1,
+        projectId: currentProject?.id,
+        pageUrl: pageUrl,
+        currentH1,
         title,
-        target_keywords: targetKeywords,
+        targetKeywords,
         count
       })
       
@@ -274,6 +274,96 @@ export function useSEOAIGeneration() {
     }
   }, [hasAccess, currentProject])
   
+  /**
+   * Generate SEO-optimized alt text suggestions for an image
+   *
+   * @param {Object} params
+   * @param {string} params.pagePath - Page path (e.g. /about)
+   * @param {string} [params.slotId] - Slot ID (e.g. hero-background)
+   * @param {string} [params.currentAlt] - Current alt text
+   * @param {string} [params.pageTitle] - Page title for context
+   * @param {string} [params.filename] - Image filename for context
+   * @param {number} [params.count] - Number of suggestions (default 3)
+   * @returns {Promise<Array>} Array of { id, text, reasoning, score }
+   */
+  const optimizeAltText = useCallback(async ({
+    pagePath,
+    slotId,
+    currentAlt,
+    pageTitle,
+    filename,
+    count = 3
+  }) => {
+    if (!hasAccess) {
+      setError('Signal AI access required')
+      return []
+    }
+
+    setIsGenerating(true)
+    setError(null)
+
+    try {
+      const result = await skillsApi.invoke('seo', 'optimize-alt-text', {
+        projectId: currentProject?.id,
+        pagePath: pagePath || '/',
+        slotId,
+        currentAlt,
+        pageTitle,
+        filename,
+        count
+      })
+
+      const newSuggestions = (result.suggestions || []).map((s) => ({
+        id: generateId(),
+        text: s.alt ?? s.text ?? '',
+        reasoning: s.reasoning ?? null,
+        score: s.score ?? null
+      }))
+
+      setSuggestions(newSuggestions)
+      return newSuggestions
+    } catch (err) {
+      console.error('Failed to optimize alt text:', err)
+      setError(err.message || 'Failed to optimize alt text')
+      throw err
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [hasAccess, currentProject])
+
+  /**
+   * Fetch alt text suggestions for one image (no state update). Use for batch optimization.
+   * @param {Object} params - Same as optimizeAltText
+   * @returns {Promise<Array>} Array of { id, text, reasoning, score }
+   */
+  const fetchAltTextSuggestions = useCallback(async ({
+    pagePath,
+    slotId,
+    currentAlt,
+    pageTitle,
+    filename,
+    count = 3
+  }) => {
+    if (!hasAccess || !currentProject?.id) {
+      throw new Error('Signal AI access and project required')
+    }
+    const result = await skillsApi.invoke('seo', 'optimize-alt-text', {
+      projectId: currentProject.id,
+      pagePath: pagePath || '/',
+      slotId,
+      currentAlt,
+      pageTitle,
+      filename,
+      count
+    })
+    return (result.suggestions || []).map((s) => ({
+      id: generateId(),
+      text: s.alt ?? s.text ?? '',
+      reasoning: s.reasoning ?? null,
+      score: s.score ?? null
+    }))
+  }, [hasAccess, currentProject])
+
   /**
    * Clear all suggestions
    */
@@ -324,6 +414,8 @@ export function useSEOAIGeneration() {
     generateTitles,
     generateMetaDescriptions,
     generateH1s,
+    optimizeAltText,
+    fetchAltTextSuggestions,
     generateMore,
     clearSuggestions
   }

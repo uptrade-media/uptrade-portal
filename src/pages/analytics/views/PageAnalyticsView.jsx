@@ -52,11 +52,12 @@ export default function PageAnalyticsView({ path }) {
   } = useAnalytics({ path })
 
   if (error && !overview) {
+    const errorMessage = typeof error === 'string' ? error : (error?.message ?? error?.response?.data?.message ?? 'Failed to load analytics. Make sure the Portal API is running.')
     return (
       <div className="space-y-6">
         <Alert variant="destructive">
           <AlertDescription className="flex items-center justify-between">
-            <span>{error}</span>
+            <span>{errorMessage}</span>
             <button
               onClick={() => { clearError(); fetchAllAnalytics(); }}
               className="text-sm underline"

@@ -78,6 +78,13 @@ const useAuthStore = create(
           error: null
         })
       },
+
+      // Merge partial user data into current user (e.g. after PATCH contact)
+      updateUser: (data) => {
+        const current = get().user
+        if (!current) return
+        set({ user: { ...current, ...data } })
+      },
       
       // Set organization context
       setOrganization: (org) => {
@@ -174,10 +181,17 @@ const useAuthStore = create(
               set({ isLoading: false })
               return { success: true, user: contactUser }
             } else {
-              console.log('[AuthStore] No matching contact found for auth user');
+              // SECURITY: User has a Supabase session but no contact record
+              // This means they shouldn't have access - sign them out completely
+              console.warn('[AuthStore] No matching contact found for auth user - signing out');
+              try {
+                await signOut()
+              } catch (signOutErr) {
+                console.error('[AuthStore] Error signing out orphan session:', signOutErr)
+              }
               get().clearAuth()
               set({ isLoading: false })
-              return { success: false }
+              return { success: false, error: 'Account not found in system. Please contact support.' }
             }
           } catch (error) {
             console.error('[AuthStore] Auth verification error:', error);
@@ -531,7 +545,15 @@ const useAuthStore = create(
         const redirect = contactUser.role === 'admin' ? '/admin' : (nextPath || '/dashboard')
         return { success: true, redirect }
       } else {
-        throw new Error('Account not found in system')
+        // SECURITY: User authenticated to Supabase but has no contact record
+        // Sign them out immediately to prevent session from persisting
+        console.warn('[AuthStore] No contact record for user - signing out')
+        try {
+          await signOut()
+        } catch (signOutErr) {
+          console.error('[AuthStore] Error signing out:', signOutErr)
+        }
+        throw new Error('Account not found in system. Please contact support.')
       }
       
     } catch (error) {

@@ -20,7 +20,7 @@ import { Card, CardContent } from '../ui/card'
 import { Separator } from '../ui/separator'
 import { Alert, AlertDescription } from '../ui/alert'
 
-import useProjectsStore from '../../lib/projects-store'
+import { useUpdateProject } from '@/lib/hooks'
 import useAuthStore from '../../lib/auth-store'
 
 // Modules that are always enabled for all tenants (not toggleable)
@@ -116,7 +116,7 @@ const CATEGORIES = {
 }
 
 const TenantModulesDialog = ({ open, onOpenChange, project }) => {
-  const { updateProject, isLoading } = useProjectsStore()
+  const updateProjectMutation = useUpdateProject()
   const { currentOrg } = useAuthStore()
   
   // Check if org has org-level Signal
@@ -127,10 +127,9 @@ const TenantModulesDialog = ({ open, onOpenChange, project }) => {
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
 
-  // Initialize from project's current features
   useEffect(() => {
     if (project && open) {
-      const features = project.tenant_features || project.tenantFeatures || []
+      const features = project.features || project.tenant_features || project.tenantFeatures || []
       setEnabledModules(new Set(features))
       setHasChanges(false)
     }
@@ -162,8 +161,9 @@ const TenantModulesDialog = ({ open, onOpenChange, project }) => {
         ...Array.from(enabledModules)
       ]
       
-      await updateProject(project.id, {
-        tenantFeatures: allEnabledFeatures
+      await updateProjectMutation.mutateAsync({
+        id: project.id,
+        updates: { features: allEnabledFeatures },
       })
       toast.success('Module access updated')
       setHasChanges(false)

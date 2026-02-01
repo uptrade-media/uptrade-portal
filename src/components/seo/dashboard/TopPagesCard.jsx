@@ -21,7 +21,8 @@ export default function TopPagesCard({
   crawling = false,
   maxRows = 5
 }) {
-  const topPages = pages.slice(0, maxRows)
+  const pageList = Array.isArray(pages) ? pages : (pages?.pages ?? [])
+  const topPages = pageList.slice(0, maxRows)
 
   return (
     <Card>

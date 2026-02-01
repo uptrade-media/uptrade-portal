@@ -1,18 +1,18 @@
 /**
  * CreativePipelinePanel - Kanban-style board for creative requests
+ * Migrated to React Query hooks
  */
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { 
   Plus, Palette, FileImage, Video, PenTool, Megaphone, Globe, Mail,
-  MoreVertical, Edit, Eye, Upload, Loader2, Calendar, User, ArrowRight
+  Loader2, Calendar, ArrowRight
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
+import { Card, CardContent } from '../ui/card'
 import { Badge } from '../ui/badge'
-import { Progress } from '../ui/progress'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from '../ui/dialog'
@@ -21,16 +21,15 @@ import { Textarea } from '../ui/textarea'
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem
 } from '../ui/select'
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuSeparator
-} from '../ui/dropdown-menu'
 import EmptyState from '../EmptyState'
 
-import useProjectsStore, { 
-  CREATIVE_STATUS_CONFIG, 
-  CREATIVE_REQUEST_TYPES 
-} from '../../lib/projects-store'
+import {
+  useCreativeRequests,
+  useCreateCreativeRequest,
+  useUpdateCreativeRequest,
+  CREATIVE_STATUS_CONFIG,
+  CREATIVE_REQUEST_TYPES,
+} from '@/lib/hooks'
 
 const formatDate = (date) => {
   if (!date) return '—'
@@ -76,24 +75,13 @@ const KANBAN_COLUMNS = [
 ]
 
 const CreativePipelinePanel = ({ projects }) => {
-  const {
-    creativeRequests,
-    isLoading,
-    fetchCreativeRequests,
-    createCreativeRequest,
-    updateCreativeRequest,
-    uploadCreativeVersion,
-  } = useProjectsStore()
-
-  // UI State
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState(null)
-  const [viewMode, setViewMode] = useState('kanban') // 'kanban' | 'list'
+  const [viewMode, setViewMode] = useState('kanban')
 
-  // Form state
   const [formData, setFormData] = useState({
     projectId: '',
     requestType: '',
@@ -104,12 +92,11 @@ const CreativePipelinePanel = ({ projects }) => {
     requirements: '',
   })
 
-  // Load creative requests when project changes
-  useEffect(() => {
-    if (selectedProjectId) {
-      fetchCreativeRequests(selectedProjectId)
-    }
-  }, [selectedProjectId])
+  const { data: creativeRequestsData, isLoading } = useCreativeRequests(selectedProjectId || null)
+  const creativeRequests = Array.isArray(creativeRequestsData) ? creativeRequestsData : (creativeRequestsData?.creativeRequests ?? creativeRequestsData ?? [])
+
+  const createCreativeRequestMutation = useCreateCreativeRequest()
+  const updateCreativeRequestMutation = useUpdateCreativeRequest()
 
   // Group requests by status for Kanban
   const requestsByStatus = useMemo(() => {
@@ -136,15 +123,17 @@ const CreativePipelinePanel = ({ projects }) => {
   const handleCreate = async (e) => {
     e.preventDefault()
     if (!formData.projectId || !formData.title || !formData.requestType) return
-    
     try {
-      await createCreativeRequest(formData.projectId, {
-        requestType: formData.requestType,
-        title: formData.title,
-        description: formData.description,
-        priority: formData.priority,
-        dueDate: formData.dueDate || null,
-        requirements: formData.requirements ? { notes: formData.requirements } : null,
+      await createCreativeRequestMutation.mutateAsync({
+        projectId: formData.projectId,
+        data: {
+          requestType: formData.requestType,
+          title: formData.title,
+          description: formData.description,
+          priority: formData.priority,
+          dueDate: formData.dueDate || null,
+          requirements: formData.requirements ? { notes: formData.requirements } : null,
+        },
       })
       toast.success('Creative request created')
       setCreateDialogOpen(false)
@@ -156,7 +145,11 @@ const CreativePipelinePanel = ({ projects }) => {
 
   const handleStatusChange = async (request, newStatus) => {
     try {
-      await updateCreativeRequest(request.project_id, request.id, { status: newStatus })
+      await updateCreativeRequestMutation.mutateAsync({
+        id: request.id,
+        projectId: request.project_id,
+        updates: { status: newStatus },
+      })
       toast.success(`Moved to ${CREATIVE_STATUS_CONFIG[newStatus]?.label || newStatus}`)
     } catch (err) {
       toast.error(err.message || 'Failed to update status')
@@ -173,12 +166,12 @@ const CreativePipelinePanel = ({ projects }) => {
     setCreateDialogOpen(true)
   }
 
-  // Creative Request Card Component
   const CreativeCard = ({ request }) => {
     const TypeIcon = typeIcons[request.request_type] || Palette
     const statusConfig = CREATIVE_STATUS_CONFIG[request.status] || {}
+    const statusClass = statusConfig.color || 'bg-gray-100 text-gray-700'
     const prioConfig = priorityConfig[request.priority] || priorityConfig.medium
-    
+
     return (
       <Card 
         className="cursor-pointer hover:shadow-md transition-shadow mb-3"
@@ -186,8 +179,8 @@ const CreativePipelinePanel = ({ projects }) => {
       >
         <CardContent className="p-4">
           <div className="flex items-start gap-3">
-            <div className={`p-2 rounded-lg ${statusConfig.bgClass || 'bg-gray-100'}`}>
-              <TypeIcon className={`w-4 h-4 ${statusConfig.iconClass || 'text-gray-600'}`} />
+            <div className={`p-2 rounded-lg ${statusClass}`}>
+              <TypeIcon className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
               <h4 className="font-medium text-sm truncate">{request.title}</h4>
@@ -220,14 +213,14 @@ const CreativePipelinePanel = ({ projects }) => {
     )
   }
 
-  // Kanban Column Component
   const KanbanColumn = ({ column, requests }) => {
     const statusConfig = CREATIVE_STATUS_CONFIG[column.key] || {}
-    
+    const dotClass = statusConfig.color ? statusConfig.color.split(' ')[0] : 'bg-gray-400'
+
     return (
       <div className="flex-1 min-w-[280px] max-w-[320px]">
         <div className="flex items-center gap-2 mb-3">
-          <div className={`w-3 h-3 rounded-full ${statusConfig.dotClass || 'bg-gray-400'}`} />
+          <div className={`w-3 h-3 rounded-full ${dotClass}`} />
           <h3 className="font-medium text-sm">{column.label}</h3>
           <Badge variant="secondary" className="ml-auto text-xs">
             {requests.length}
@@ -451,7 +444,7 @@ const CreativePipelinePanel = ({ projects }) => {
               <div className="space-y-4">
                 {/* Status & Priority */}
                 <div className="flex items-center gap-3">
-                  <Badge className={CREATIVE_STATUS_CONFIG[selectedRequest.status]?.badgeClass || 'bg-gray-100'}>
+                  <Badge className={CREATIVE_STATUS_CONFIG[selectedRequest.status]?.color || 'bg-gray-100 text-gray-700'}>
                     {CREATIVE_STATUS_CONFIG[selectedRequest.status]?.label || selectedRequest.status}
                   </Badge>
                   <Badge className={priorityConfig[selectedRequest.priority]?.class || ''}>

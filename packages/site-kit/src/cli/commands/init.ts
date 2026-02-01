@@ -7,10 +7,17 @@ import ora from 'ora'
 import inquirer from 'inquirer'
 import fs from 'fs/promises'
 import path from 'path'
-import { scanCodebase } from '../scanner/index.js'
-import { migrateFiles } from '../migrator/index.js'
-import { generateProvider, generateEnvFile } from '../generators/index.js'
-import { authenticateWithUptrade, fetchOrgs, fetchProjects, createProject } from '../api/uptrade.js'
+import { scanCodebase } from '../scanner'
+import { migrateFiles } from '../migrator'
+import { generateProvider, generateEnvFile } from '../generators'
+import { 
+  authenticateWithUptrade, 
+  authenticateWithApiKey, 
+  fetchOrganizations, 
+  fetchProjects, 
+  createProject,
+  generateApiKey 
+} from '../api/uptrade'
 
 interface InitOptions {
   apiKey?: string
@@ -47,111 +54,129 @@ export async function initCommand(options: InitOptions) {
   const spinner = ora('Connecting to Uptrade...').start()
   
   let apiKey = options.apiKey || process.env.UPTRADE_API_KEY
-  let auth: any
-
-  if (!apiKey) {
-    spinner.stop()
-    const { key } = await inquirer.prompt([{
-      type: 'password',
-      name: 'key',
-      message: 'Enter your Uptrade API key:',
-      mask: '•',
-      validate: (input) => input.length > 0 || 'API key is required'
-    }])
-    apiKey = key
-    spinner.start()
+  let auth: { 
+    accessToken: string
+    userId: string
+    email: string
+    projectId?: string
+    projectName?: string
+    orgId?: string
+    orgName?: string
+    isApiKey?: boolean
   }
 
-  try {
-    auth = await authenticateWithUptrade(apiKey!)
-    spinner.succeed(`Authenticated as ${chalk.cyan(auth.email)}`)
-  } catch (error: any) {
-    spinner.fail('Authentication failed')
-    console.log(chalk.red(`  ${error.message}`))
-    process.exit(1)
-  }
-
-  // Step 2: Select Organization
-  const orgs = await fetchOrgs(auth.token)
-  
-  const { orgId } = await inquirer.prompt([{
-    type: 'list',
-    name: 'orgId',
-    message: 'Select organization:',
-    choices: [
-      ...orgs.map((o: any) => ({ name: o.name, value: o.id })),
-      { name: chalk.gray('+ Create new organization'), value: 'new' }
-    ]
-  }])
-
-  let selectedOrgId = orgId
-  if (orgId === 'new') {
-    const { orgName } = await inquirer.prompt([{
-      type: 'input',
-      name: 'orgName',
-      message: 'New organization name:',
-      validate: (input) => input.length > 0 || 'Name is required'
-    }])
-    // Create org logic here
-    console.log(chalk.yellow('  (Org creation coming soon - please create in Portal first)'))
-    process.exit(1)
-  }
-
-  // Step 3: Select or Create Project
-  const projects = await fetchProjects(auth.token, selectedOrgId)
-  
-  const { projectId } = await inquirer.prompt([{
-    type: 'list',
-    name: 'projectId',
-    message: 'Select project:',
-    choices: [
-      { name: chalk.gray('+ Create new project'), value: 'new' },
-      ...projects.map((p: any) => ({ name: p.name, value: p.id })),
-    ]
-  }])
-
-  let selectedProjectId = projectId
-  let projectName = ''
-  let projectDomain = ''
-
-  if (projectId === 'new') {
-    const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'name',
-        message: 'Project name:',
-        default: path.basename(process.cwd()),
-        validate: (input) => input.length > 0 || 'Name is required'
-      },
-      {
-        type: 'input',
-        name: 'domain',
-        message: 'Project domain (e.g., https://example.com):',
-        validate: (input) => {
-          if (!input) return true // Optional
-          return input.startsWith('http') || 'Must start with http:// or https://'
-        }
-      }
-    ])
-    
-    const createSpinner = ora('Creating project...').start()
+  if (apiKey) {
+    // Use API key authentication
     try {
-      const project = await createProject(auth.token, {
-        orgId: selectedOrgId,
-        name: answers.name,
-        domain: answers.domain || null
-      })
-      selectedProjectId = project.id
-      projectName = project.name
-      createSpinner.succeed(`Created project: ${chalk.cyan(project.name)}`)
+      auth = await authenticateWithApiKey(apiKey)
+      spinner.succeed(`Authenticated as ${chalk.cyan(auth.email)}`)
     } catch (error: any) {
-      createSpinner.fail('Failed to create project')
+      spinner.fail('Authentication failed')
       console.log(chalk.red(`  ${error.message}`))
       process.exit(1)
     }
   } else {
-    const project = projects.find((p: any) => p.id === projectId)
-    projectName = project?.name || ''
+    // Use OAuth browser flow
+    spinner.text = 'Opening browser for authentication...'
+    try {
+      auth = await authenticateWithUptrade()
+      spinner.succeed(`Authenticated as ${chalk.cyan(auth.email)}`)
+      apiKey = auth.accessToken
+    } catch (error: any) {
+      spinner.fail('Authentication failed')
+      console.log(chalk.red(`  ${error.message}`))
+      process.exit(1)
+    }
+  }
+
+  let selectedProjectId: string
+  let projectName: string = ''
+
+  // If using API key, we already have the project info
+  if (auth.isApiKey && auth.projectId) {
+    selectedProjectId = auth.projectId
+    projectName = auth.projectName || 'Unknown Project'
+    console.log(chalk.gray(`  Using project: ${chalk.cyan(projectName)}`))
+  } else {
+    // Step 2: Select Organization (OAuth flow only)
+    const orgs = await fetchOrganizations(auth.accessToken)
+  
+    const { orgId } = await inquirer.prompt([{
+      type: 'list',
+      name: 'orgId',
+      message: 'Select organization:',
+      choices: [
+        ...orgs.map((o: any) => ({ name: o.name, value: o.id })),
+        { name: chalk.gray('+ Create new organization'), value: 'new' }
+      ]
+    }])
+
+    let selectedOrgId = orgId
+    if (orgId === 'new') {
+      const { orgName } = await inquirer.prompt([{
+        type: 'input',
+        name: 'orgName',
+        message: 'New organization name:',
+        validate: (input) => input.length > 0 || 'Name is required'
+      }])
+      // Create org logic here
+      console.log(chalk.yellow('  (Org creation coming soon - please create in Portal first)'))
+      process.exit(1)
+    }
+
+    // Step 3: Select or Create Project
+    const projects = await fetchProjects(auth.accessToken, selectedOrgId)
+  
+    const { projectId } = await inquirer.prompt([{
+      type: 'list',
+      name: 'projectId',
+      message: 'Select project:',
+      choices: [
+        { name: chalk.gray('+ Create new project'), value: 'new' },
+        ...projects.map((p: any) => ({ name: p.name, value: p.id })),
+      ]
+    }])
+
+    selectedProjectId = projectId
+
+    if (projectId === 'new') {
+      const answers = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'name',
+          message: 'Project name:',
+          default: path.basename(process.cwd()),
+          validate: (input) => input.length > 0 || 'Name is required'
+        },
+        {
+          type: 'input',
+          name: 'domain',
+          message: 'Project domain (e.g., https://example.com):',
+          validate: (input) => {
+            if (!input) return true // Optional
+            return input.startsWith('http') || 'Must start with http:// or https://'
+          }
+        }
+      ])
+    
+      const createSpinner = ora('Creating project...').start()
+      try {
+        const project = await createProject(auth.accessToken, selectedOrgId, {
+          name: answers.name,
+          domain: answers.domain || ''
+        })
+        selectedProjectId = project.id
+        projectName = project.name
+        createSpinner.succeed(`Created project: ${chalk.cyan(project.name)}`)
+      } catch (error: any) {
+        createSpinner.fail('Failed to create project')
+        console.log(chalk.red(`  ${error.message}`))
+        process.exit(1)
+      }
+    } else {
+      const project = projects.find((p: any) => p.id === projectId)
+      projectName = project?.name || ''
+    }
   }
 
   // Step 4: Scan Codebase
@@ -201,13 +226,30 @@ export async function initCommand(options: InitOptions) {
   console.log('')
   const setupSpinner = ora('Setting up Site-Kit...').start()
 
+  // Supabase config (public keys)
+  const SUPABASE_URL = 'https://mwcjtnoqxolplwpkxnfe.supabase.co'
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im13Y2p0bm9xeG9scGx3cGt4bmZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTk5MTQxMTUsImV4cCI6MjAxNTQ5MDExNX0.9vBVpQTqhCQmNk-I3dqQKpH0Xyq1i1_E7Dxv3zJQKdU'
+
   try {
+    // Generate API key for the project if we used OAuth
+    let projectApiKey = apiKey
+    if (!options.apiKey && !process.env.UPTRADE_API_KEY) {
+      const keySpinner = ora('Generating API key...').start()
+      try {
+        projectApiKey = await generateApiKey(auth.accessToken, selectedProjectId)
+        keySpinner.succeed('Generated API key')
+      } catch {
+        keySpinner.warn('Could not generate API key - you may need to create one in Portal')
+        projectApiKey = 'your-api-key-here'
+      }
+    }
+
     // Generate .env.local
     await generateEnvFile({
       projectId: selectedProjectId,
-      supabaseUrl: auth.supabaseUrl,
-      supabaseAnonKey: auth.supabaseAnonKey,
-      apiKey: apiKey!
+      supabaseUrl: SUPABASE_URL,
+      supabaseAnonKey: SUPABASE_ANON_KEY,
+      apiKey: projectApiKey!
     })
 
     // Add SiteKitProvider to layout

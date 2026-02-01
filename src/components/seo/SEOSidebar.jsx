@@ -1,9 +1,10 @@
 // src/components/seo/SEOSidebar.jsx
 // Vertical sidebar navigation for SEO module with collapsible sections
-// Updated to match Sync module styling with muted backgrounds
+// Uses ModuleLayout predefined sidebar typography (no inline font/weight overrides)
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { MODULE_SIDEBAR_TYPOGRAPHY } from '@/components/ModuleLayout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -46,72 +47,28 @@ import {
   HelpCircle
 } from 'lucide-react'
 
-// Navigation sections configuration
+// Navigation configuration
+// CONSOLIDATED: No dropdowns - each section is a single page
+// See docs/SEO-MODULE-ROADMAP.md for full feature roadmap
+const NAV_ITEMS = [
+  // Core SEO
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, description: 'Rankings & performance overview' },
+  { id: 'pages', label: 'Pages', icon: FileText, description: 'On-page optimization' },
+  { id: 'keywords', label: 'Keywords', icon: Target, description: 'Keyword intelligence & tracking' },
+  { id: 'content', label: 'Content', icon: Layers, description: 'Content strategy & decay detection', signal: true },
+  
+  // Specialized
+  { id: 'local-seo', label: 'Local SEO', icon: MapPin, description: 'GBP, citations & local rankings' },
+  { id: 'technical', label: 'Technical', icon: Shield, description: 'Site audit, indexing & health' },
+  
+  // Intelligence (Signal features)
+  { id: 'backlinks', label: 'Backlinks', icon: Link2, description: 'Link monitoring & authority', signal: true },
+  { id: 'competitors', label: 'Competitors', icon: Users, description: 'Competitor gap analysis', signal: true },
+  { id: 'reporting', label: 'Reporting', icon: BarChart3, description: 'ROI reports & summaries', signal: true },
+]
+
+// Legacy NAV_SECTIONS for backwards compatibility during transition
 const NAV_SECTIONS = [
-  {
-    id: 'overview',
-    label: 'Overview',
-    defaultOpen: true,
-    items: [
-      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, description: 'SEO health & metrics' },
-      { id: 'alerts', label: 'Alerts', icon: Bell, badge: 'alerts', description: 'Issues needing attention' },
-      { id: 'history', label: 'History', icon: History, description: 'Change timeline' },
-    ]
-  },
-  {
-    id: 'content',
-    label: 'Content & Pages',
-    defaultOpen: true,
-    items: [
-      { id: 'pages', label: 'Pages', icon: FileText, description: 'All indexed pages' },
-      { id: 'keywords', label: 'Keywords', icon: Target, description: 'Keyword rankings' },
-      { id: 'opportunities', label: 'Opportunities', icon: Sparkles, description: 'Quick wins' },
-      { id: 'content-decay', label: 'Content Decay', icon: TrendingDown, description: 'Aging content' },
-    ]
-  },
-  {
-    id: 'technical',
-    label: 'Technical',
-    defaultOpen: false,
-    items: [
-      { id: 'technical', label: 'Audit', icon: Shield, description: 'Technical issues' },
-      { id: 'indexing', label: 'Indexing', icon: FileSearch, description: 'GSC index status' },
-      { id: 'internal-links', label: 'Internal Links', icon: Link2, description: 'Link structure' },
-      { id: 'schema', label: 'Schema', icon: Code, description: 'Structured data' },
-      { id: 'faqs', label: 'Managed FAQs', icon: HelpCircle, description: 'FAQ sections + schema' },
-      { id: 'backlinks', label: 'Backlinks', icon: GitBranch, description: 'External links' },
-    ]
-  },
-  {
-    id: 'local',
-    label: 'Local & Competitors',
-    defaultOpen: false,
-    items: [
-      { id: 'local-seo', label: 'Local SEO', icon: MapPin, description: 'Local visibility' },
-      { id: 'competitors', label: 'Competitors', icon: Users, description: 'Competitor tracking' },
-    ]
-  },
-  {
-    id: 'ai',
-    label: 'Signal Tools',
-    signal: true, // Requires Signal
-    defaultOpen: true,
-    items: [
-      { id: 'ai-insights', label: 'Signal SEO', icon: SignalIcon, signal: true, description: 'AI-powered analysis' },
-      { id: 'content-briefs', label: 'Content Briefs', icon: FileCheck, signal: true, description: 'Writing briefs' },
-    ]
-  },
-  {
-    id: 'automation',
-    label: 'Automation',
-    signal: true,
-    defaultOpen: false,
-    items: [
-      { id: 'sprints', label: 'Sprints', icon: Rocket, signal: true, description: 'Weekly SEO goals' },
-      { id: 'autopilot', label: 'Autopilot', icon: Zap, signal: true, description: 'Auto-optimization' },
-      { id: 'collaboration', label: 'Team', icon: Users2, signal: true, description: 'Tasks & approvals' },
-    ]
-  }
 ]
 
 function NavItem({ item, isActive, onClick, isCollapsed, hasSignal, alertCount }) {
@@ -122,9 +79,9 @@ function NavItem({ item, isActive, onClick, isCollapsed, hasSignal, alertCount }
       onClick={() => !isLocked && onClick(item.id)}
       disabled={isLocked}
       className={cn(
-        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+        "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
         isActive 
-          ? "bg-primary/10 text-primary font-medium" 
+          ? "bg-primary/10 text-primary" 
           : "hover:bg-muted text-foreground",
         isLocked && "opacity-50 cursor-not-allowed"
       )}
@@ -213,7 +170,7 @@ function NavSection({ section, activeTab, onTabChange, isCollapsed, hasSignal, a
     >
       <CollapsibleTrigger asChild>
         <button className={cn(
-          "w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider",
+          "w-full flex items-center gap-2 px-3 py-2 uppercase tracking-wider",
           "text-muted-foreground hover:text-foreground transition-colors",
           hasActiveItem && "text-foreground"
         )}>
@@ -224,7 +181,7 @@ function NavSection({ section, activeTab, onTabChange, isCollapsed, hasSignal, a
           )}
           <span className="flex-1 text-left">{section.label}</span>
           {isLocked && (
-            <div className="flex items-center gap-1 text-[10px] font-medium text-violet-500 bg-violet-500/10 px-1.5 py-0.5 rounded">
+            <div className="flex items-center gap-1 text-xs text-violet-500 bg-violet-500/10 px-1.5 py-0.5 rounded">
               <Sparkles className="h-2.5 w-2.5" />
               Signal
             </div>
@@ -248,43 +205,25 @@ function NavSection({ section, activeTab, onTabChange, isCollapsed, hasSignal, a
   )
 }
 
-// Desktop sidebar component
+// Desktop sidebar component - FLAT LIST (no collapsible sections)
 function DesktopSidebar({ activeTab, onTabChange, alertCount, isCollapsed, onToggleCollapse, embedded }) {
   const { hasAccess: hasSignalAccess } = useSignalAccess()
-  
-  // Track which sections are open
-  const [openSections, setOpenSections] = useState(() => {
-    const initial = {}
-    NAV_SECTIONS.forEach(section => {
-      initial[section.id] = section.defaultOpen
-    })
-    return initial
-  })
-
-  const toggleSection = (sectionId) => {
-    setOpenSections(prev => ({
-      ...prev,
-      [sectionId]: !prev[sectionId]
-    }))
-  }
 
   // Embedded mode - used inside SEOModule with motion animation
   if (embedded) {
     return (
       <ScrollArea className="h-full">
-        <div className="px-2 py-3">
-          <nav className="space-y-4">
-            {NAV_SECTIONS.map(section => (
-              <NavSection
-                key={section.id}
-                section={section}
-                activeTab={activeTab}
-                onTabChange={onTabChange}
+        <div className={cn('px-2 py-3', MODULE_SIDEBAR_TYPOGRAPHY)}>
+          <nav className="space-y-1">
+            {NAV_ITEMS.map(item => (
+              <NavItem
+                key={item.id}
+                item={item}
+                isActive={activeTab === item.id}
+                onClick={onTabChange}
                 isCollapsed={false}
                 hasSignal={hasSignalAccess}
-                alertCount={alertCount}
-                openSections={openSections}
-                onToggleSection={toggleSection}
+                alertCount={item.badge === 'alerts' ? alertCount : 0}
               />
             ))}
           </nav>
@@ -294,12 +233,12 @@ function DesktopSidebar({ activeTab, onTabChange, alertCount, isCollapsed, onTog
             <div className="mt-6 p-3 rounded-lg bg-gradient-to-br from-violet-500/10 to-purple-500/10 border border-violet-500/20">
               <div className="flex items-center gap-2 mb-2">
                 <Sparkles className="h-4 w-4 text-violet-500" />
-                <span className="text-xs font-semibold text-violet-500">Upgrade to Signal</span>
+                <span className="text-violet-500">Upgrade to Signal</span>
               </div>
-              <p className="text-[10px] text-muted-foreground mb-2">
-                Unlock AI-powered SEO automation
+              <p className="text-muted-foreground mb-2">
+                Unlock Signal-powered SEO automation
               </p>
-              <Button size="sm" variant="outline" className="w-full h-7 text-xs border-violet-500/30 text-violet-500 hover:bg-violet-500/10">
+              <Button size="sm" variant="outline" className="w-full h-7 border-violet-500/30 text-violet-500 hover:bg-violet-500/10">
                 Learn More
               </Button>
             </div>
@@ -331,36 +270,34 @@ function DesktopSidebar({ activeTab, onTabChange, alertCount, isCollapsed, onTog
       </div>
 
       {/* Navigation */}
-      <ScrollArea className="flex-1 px-2 py-3">
-        <nav className="space-y-4">
-          {NAV_SECTIONS.map(section => (
-            <NavSection
-              key={section.id}
-              section={section}
-              activeTab={activeTab}
-              onTabChange={onTabChange}
+      <ScrollArea className={cn('flex-1 px-2 py-3', MODULE_SIDEBAR_TYPOGRAPHY)}>
+        <nav className="space-y-1">
+          {NAV_ITEMS.map(item => (
+            <NavItem
+              key={item.id}
+              item={item}
+              isActive={activeTab === item.id}
+              onClick={onTabChange}
               isCollapsed={isCollapsed}
               hasSignal={hasSignalAccess}
-              alertCount={alertCount}
-              openSections={openSections}
-              onToggleSection={toggleSection}
+              alertCount={item.badge === 'alerts' ? alertCount : 0}
             />
           ))}
         </nav>
       </ScrollArea>
 
-      {/* Signal upgrade prompt (when collapsed) */}
+      {/* Signal upgrade prompt (when not collapsed) */}
       {!hasSignalAccess && !isCollapsed && (
         <div className="p-3 border-t border-border/50">
           <div className="p-3 rounded-lg bg-gradient-to-br from-violet-500/10 to-purple-500/10 border border-violet-500/20">
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="h-4 w-4 text-violet-500" />
-              <span className="text-xs font-semibold text-violet-500">Upgrade to Signal</span>
+              <span className="text-violet-500">Upgrade to Signal</span>
             </div>
-            <p className="text-[10px] text-muted-foreground mb-2">
-              Unlock AI-powered SEO automation
+            <p className="text-muted-foreground mb-2">
+              Unlock Signal-powered SEO automation
             </p>
-            <Button size="sm" variant="outline" className="w-full h-7 text-xs border-violet-500/30 text-violet-500 hover:bg-violet-500/10">
+            <Button size="sm" variant="outline" className="w-full h-7 border-violet-500/30 text-violet-500 hover:bg-violet-500/10">
               Learn More
             </Button>
           </div>
@@ -371,24 +308,10 @@ function DesktopSidebar({ activeTab, onTabChange, alertCount, isCollapsed, onTog
 }
 
 // Mobile sidebar (drawer)
+// Mobile sidebar (drawer) - FLAT LIST
 function MobileSidebar({ activeTab, onTabChange, alertCount }) {
   const [open, setOpen] = useState(false)
   const { hasAccess: hasSignalAccess } = useSignalAccess()
-  
-  const [openSections, setOpenSections] = useState(() => {
-    const initial = {}
-    NAV_SECTIONS.forEach(section => {
-      initial[section.id] = section.defaultOpen
-    })
-    return initial
-  })
-
-  const toggleSection = (sectionId) => {
-    setOpenSections(prev => ({
-      ...prev,
-      [sectionId]: !prev[sectionId]
-    }))
-  }
 
   const handleTabChange = (tabId) => {
     onTabChange(tabId)
@@ -403,23 +326,21 @@ function MobileSidebar({ activeTab, onTabChange, alertCount }) {
         </Button>
       </SheetTrigger>
       <SheetContent side="left" className="w-64 p-0">
-        <div className="h-full flex flex-col">
+        <div className={cn('h-full flex flex-col', MODULE_SIDEBAR_TYPOGRAPHY)}>
           <div className="p-4 border-b border-border/50">
-            <h2 className="font-semibold">SEO Navigation</h2>
+            <h2>SEO Navigation</h2>
           </div>
           <ScrollArea className="flex-1 px-2 py-3">
-            <nav className="space-y-4">
-              {NAV_SECTIONS.map(section => (
-                <NavSection
-                  key={section.id}
-                  section={section}
-                  activeTab={activeTab}
-                  onTabChange={handleTabChange}
+            <nav className="space-y-1">
+              {NAV_ITEMS.map(item => (
+                <NavItem
+                  key={item.id}
+                  item={item}
+                  isActive={activeTab === item.id}
+                  onClick={handleTabChange}
                   isCollapsed={false}
                   hasSignal={hasSignalAccess}
-                  alertCount={alertCount}
-                  openSections={openSections}
-                  onToggleSection={toggleSection}
+                  alertCount={item.badge === 'alerts' ? alertCount : 0}
                 />
               ))}
             </nav>
@@ -465,4 +386,4 @@ export default function SEOSidebar({
 }
 
 // Export config for use elsewhere
-export { NAV_SECTIONS }
+export { NAV_ITEMS, NAV_SECTIONS }

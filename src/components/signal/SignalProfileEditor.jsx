@@ -39,7 +39,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useSignalStore } from '@/lib/signal-store'
+import { useSignalStore } from '@/lib/signal-store' // Keep for streaming UI state
+import { signalKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { getIndustryOptions, applyIndustryTemplate } from '@/lib/signal-industry-templates'
 import { cn } from '@/lib/utils'
 import { profileApi } from '@/lib/signal-api'

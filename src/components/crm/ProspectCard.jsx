@@ -83,8 +83,8 @@ const ProspectCard = memo(function ProspectCard({
       draggable
       onDragStart={handleDragStart}
       className={cn(
-        // Base card styling - modern rounded-xl
-        'group relative p-3 cursor-grab transition-all duration-200 rounded-xl',
+        // Base card styling - modern rounded-xl; select-none so drag wins over text selection
+        'group relative p-3 cursor-grab select-none transition-all duration-200 rounded-xl',
         'bg-[var(--glass-bg)] border border-[var(--glass-border)]',
         // Hover state
         'hover:shadow-md hover:border-[var(--text-tertiary)]',

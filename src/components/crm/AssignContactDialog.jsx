@@ -24,7 +24,8 @@ import {
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { GlassAvatar } from './ui'
-import useTeamStore from '@/lib/team-store'
+import { useTeamMembers, teamKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
 
 export default function AssignContactDialog({
   open,
@@ -34,7 +35,7 @@ export default function AssignContactDialog({
   onAssign,
   isLoading = false
 }) {
-  const { teamMembers, fetchTeamMembers } = useTeamStore()
+  const { data: teamMembers = [] } = useTeamMembers() // React Query auto-fetches
   const [selectedMemberId, setSelectedMemberId] = useState(null)
   const [sendNotification, setSendNotification] = useState(true)
 

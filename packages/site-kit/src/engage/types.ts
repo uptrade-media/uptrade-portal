@@ -2,11 +2,13 @@
  * @uptrade/site-kit/engage - Type definitions
  */
 
+import type { DesignDocument } from './DesignRenderer'
+
 // ============================================
 // Widget Types
 // ============================================
 
-export type WidgetType = 'popup' | 'nudge' | 'bar' | 'chat'
+export type WidgetType = 'popup' | 'nudge' | 'bar' | 'chat' | 'slide-in'
 
 export interface EngageElement {
   id: string
@@ -20,6 +22,11 @@ export interface EngageElement {
   priority: number
   created_at: string
   updated_at: string
+  
+  // Design Studio fields
+  design_json?: DesignDocument
+  compiled_bundle_url?: string
+  status?: 'draft' | 'published' | 'archived' | 'paused'
 }
 
 // ============================================
@@ -136,6 +143,10 @@ export interface ChatConfig {
   buttonColor?: string
   buttonText?: string  // Text next to button
   
+  /** Brand colors (primary -> secondary gradient) */
+  brandPrimary?: string
+  brandSecondary?: string
+  
   /** Welcome message */
   welcomeMessage?: string
   
@@ -156,7 +167,25 @@ export interface ChatConfig {
     skillId?: string  // Echo skill to use
     handoffToLive?: boolean
     handoffKeywords?: string[]
+    /** When AI should suggest handoff based on sentiment or keywords */
+    handoffTriggers?: {
+      negativesentiment?: boolean
+      keywords?: string[]
+      afterMessages?: number
+    }
   }
+  
+  /** Offline mode settings (when no agents available) */
+  offlineMode?: 'form' | 'ai' | 'message'
+  
+  /** Form slug to show when offline (defaults to 'contact') */
+  offlineFormSlug?: string
+  
+  /** AI fallback when no agents online (hybrid mode) */
+  aiFallbackEnabled?: boolean
+  
+  /** Custom offline message */
+  offlineMessage?: string
 }
 
 export interface ChatMessage {
@@ -166,16 +195,33 @@ export interface ChatMessage {
   content: string
   metadata?: Record<string, unknown>
   created_at: string
+  /** Name of the agent (for agent messages) */
+  sender_name?: string
+  /** Avatar URL of the agent */
+  sender_avatar?: string
 }
 
 export interface ChatConversation {
   id: string
   project_id: string
   visitor_id: string
-  status: 'active' | 'pending' | 'resolved' | 'closed'
+  status: 'active' | 'ai' | 'pending_handoff' | 'human' | 'closed'
   assigned_to?: string
   last_message_at: string
   created_at: string
+  /** AI summary of the conversation */
+  ai_summary?: string
+  /** Visitor info */
+  visitor_name?: string
+  visitor_email?: string
+}
+
+/** Availability status returned by the widget API */
+export interface ChatAvailability {
+  available: boolean
+  mode: 'live' | 'ai' | 'offline'
+  agentsOnline: number
+  operatingHoursActive: boolean
 }
 
 // ============================================

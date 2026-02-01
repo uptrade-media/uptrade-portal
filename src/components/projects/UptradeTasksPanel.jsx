@@ -42,13 +42,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { EmptyState } from '@/components/EmptyState'
 
 // Store
 import {
   UPTRADE_TASK_STATUS_CONFIG,
   UPTRADE_TASK_PRIORITY_CONFIG,
   UPTRADE_TASK_MODULE_CONFIG,
-} from '@/lib/projects-v2-store'
+} from '@/lib/hooks'
 
 // Priority icons
 const PRIORITY_ICONS = {
@@ -316,17 +317,14 @@ export function UptradeTasksPanel({
 
           {/* Empty State */}
           {tasks.length === 0 && !isLoading && (
-            <div className="text-center py-12">
-              <CheckCircle2 className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-              <h3 className="text-lg font-medium mb-1">No tasks yet</h3>
-              <p className="text-muted-foreground mb-4">
-                Create your first task to get started
-              </p>
-              <Button onClick={() => onTaskSelect?.(null)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Task
-              </Button>
-            </div>
+            <EmptyState
+              icon={CheckCircle2}
+              title="No tasks yet"
+              description="Create your first task to get started"
+              actionLabel={onTaskSelect ? 'Add Task' : undefined}
+              onAction={onTaskSelect ? () => onTaskSelect(null) : undefined}
+              compact
+            />
           )}
         </div>
       </ScrollArea>

@@ -2,6 +2,7 @@
  * @uptrade/site-kit/engage - Engage Widget
  * 
  * Loads and renders engagement widgets (popups, nudges, bars, chat) via Portal API
+ * Supports both legacy config-based rendering and new design_json from Engage Studio
  */
 
 'use client'
@@ -10,6 +11,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { usePathname } from 'next/navigation'
 import type { EngageElement } from './types'
 import { ChatWidget } from './ChatWidget'
+import { DesignRenderer, type ActionConfig, type DesignDocument } from './DesignRenderer'
 
 interface EngageWidgetProps {
   apiUrl?: string
@@ -217,7 +219,103 @@ function EngageElementRenderer({
   onDismiss: () => void
   zIndex: number
 }) {
-  // Simple popup rendering - expand as needed
+  // If element has design_json from Engage Studio, use DesignRenderer
+  if (element.design_json) {
+    // Wrap in appropriate container based on element type
+    if (element.type === 'popup') {
+      return (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex,
+          }}
+          onClick={onDismiss}
+        >
+          <div onClick={e => e.stopPropagation()}>
+            <DesignRenderer
+              design={element.design_json}
+              onClose={onDismiss}
+              onAction={(action, node) => {
+                // Handle commerce/form actions here
+                console.log('[Engage] Action:', action, node)
+              }}
+            />
+          </div>
+        </div>
+      )
+    }
+    
+    if (element.type === 'bar') {
+      return (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex,
+          }}
+        >
+          <DesignRenderer
+            design={element.design_json}
+            onClose={onDismiss}
+            onAction={(action, node) => {
+              console.log('[Engage] Action:', action, node)
+            }}
+          />
+        </div>
+      )
+    }
+    
+    if (element.type === 'nudge' || element.type === 'slide-in') {
+      const position = element.config?.position || 'bottom-right'
+      const positionStyles: Record<string, React.CSSProperties> = {
+        'bottom-right': { bottom: 20, right: 20 },
+        'bottom-left': { bottom: 20, left: 20 },
+        'top-right': { top: 20, right: 20 },
+        'top-left': { top: 20, left: 20 },
+      }
+      
+      return (
+        <div
+          style={{
+            position: 'fixed',
+            zIndex,
+            ...positionStyles[position],
+          }}
+        >
+          <DesignRenderer
+            design={element.design_json}
+            onClose={onDismiss}
+            onAction={(action, node) => {
+              console.log('[Engage] Action:', action, node)
+            }}
+          />
+        </div>
+      )
+    }
+    
+    // Default: render design_json directly
+    return (
+      <DesignRenderer
+        design={element.design_json}
+        onClose={onDismiss}
+        onAction={(action, node) => {
+          console.log('[Engage] Action:', action, node)
+        }}
+      />
+    )
+  }
+
+  // Legacy: Simple popup rendering for elements without design_json
   if (element.type === 'popup') {
     return (
       <div

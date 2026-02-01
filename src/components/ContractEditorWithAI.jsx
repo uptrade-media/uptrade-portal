@@ -38,7 +38,7 @@ import {
   FileText,
   Save
 } from 'lucide-react'
-import ProposalView from './ProposalView'
+import ProposalView from './proposals/ProposalView'
 import { commerceApi, proposalsApi } from '@/lib/portal-api'
 import useAuthStore from '@/lib/auth-store'
 import { toast } from '@/lib/toast'

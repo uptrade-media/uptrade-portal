@@ -72,6 +72,7 @@ import { cn } from '@/lib/utils';
 import { format, addHours, startOfHour } from 'date-fns';
 import { useBroadcastStore } from '@/stores/broadcastStore';
 import useAuthStore from '@/lib/auth-store';
+import { useBroadcastInsights, transformInsightsForComponent } from '@/hooks/useBroadcastInsights';
 import { PlatformIcon } from './PlatformIcon';
 import { toast } from 'sonner';
 
@@ -713,10 +714,15 @@ function PlatformToolsPanel({
   onAddSticker,
   activeStickers,
   platforms,
+  // Real insights data from API
+  platformTimes = [],
+  insightsLoading = false,
+  insightsSource = null,
 }) {
   const platformTrends = PLATFORM_STORY_TRENDS[activePlatform] || [];
   const platformFormats = PLATFORM_STORY_FORMATS[activePlatform] || [];
-  const platformTimes = PLATFORM_PEAK_TIMES[activePlatform] || [];
+  // Use passed-in peak times (fall back to hardcoded if needed)
+  const peakTimes = platformTimes.length > 0 ? platformTimes : (PLATFORM_PEAK_TIMES[activePlatform] || []);
   const colors = PLATFORM_COLORS[activePlatform] || { primary: '#666' };
 
   // Get available stickers based on platform
@@ -835,17 +841,31 @@ function PlatformToolsPanel({
             <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
               <Clock className="h-3.5 w-3.5" style={{ color: colors.primary }} />
               Peak Story Times
+              {insightsSource === 'live' && (
+                <span className="text-[9px] text-green-500 ml-auto">Live</span>
+              )}
             </h4>
             <div className="grid grid-cols-3 gap-2">
-              {platformTimes.map((slot) => (
-                <div
-                  key={slot.time}
-                  className="flex flex-col items-center rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2 py-2"
-                >
-                  <span className="text-[10px] text-[var(--text-secondary)]">{slot.time}</span>
-                  <span className="text-xs font-medium text-green-500">{slot.engagement}</span>
-                </div>
-              ))}
+              {insightsLoading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex flex-col items-center rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2 py-2 animate-pulse">
+                    <div className="h-3 bg-[var(--glass-border)] rounded w-12 mb-1" />
+                    <div className="h-3 bg-[var(--glass-border)] rounded w-8" />
+                  </div>
+                ))
+              ) : peakTimes.length > 0 ? (
+                peakTimes.map((slot) => (
+                  <div
+                    key={slot.time}
+                    className="flex flex-col items-center rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2 py-2"
+                  >
+                    <span className="text-[10px] text-[var(--text-secondary)]">{slot.time}</span>
+                    <span className="text-xs font-medium text-green-500">{slot.engagement}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="col-span-3 text-xs text-[var(--text-tertiary)] italic text-center">No peak time data</p>
+              )}
             </div>
           </div>
         </div>
@@ -877,6 +897,11 @@ export function StoryComposer({
   // State
   const [platforms, setPlatforms] = useState([]);
   const [activePlatform, setActivePlatform] = useState('instagram'); // Currently focused platform
+
+  // Fetch real insights for the active platform (peak times, formats, trends)
+  const insights = useBroadcastInsights(projectId, activePlatform);
+  const insightsData = transformInsightsForComponent(insights);
+
   const [mediaFile, setMediaFile] = useState(null);
   const [text, setText] = useState('');
   const [stickers, setStickers] = useState([]);
@@ -1016,6 +1041,10 @@ export function StoryComposer({
               onAddSticker={handleAddSticker}
               activeStickers={stickers}
               platforms={platforms}
+              // Real insights data from API
+              platformTimes={insightsData.platformTimes}
+              insightsLoading={insights.isLoading}
+              insightsSource={insights.source}
             />
           </div>
 

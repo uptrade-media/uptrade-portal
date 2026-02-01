@@ -63,27 +63,44 @@ import {
   Copy,
   ExternalLink,
   FileCode,
+  Loader2,
 } from 'lucide-react'
 import { portalApi } from '@/lib/portal-api'
+import { signalSeoApi } from '@/lib/signal-api'
+import SignalIcon from '@/components/ui/SignalIcon'
+
+const isNetworkError = (err) =>
+  err?.code === 'ERR_NETWORK' ||
+  err?.message === 'Network Error' ||
+  (err?.request && !err?.response)
 
 export default function SEOManagedFAQs({ projectId }) {
   const [faqSections, setFaqSections] = useState([])
   const [loading, setLoading] = useState(true)
+  const [networkError, setNetworkError] = useState(false)
   const [search, setSearch] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingSection, setEditingSection] = useState(null)
   const [expandedSections, setExpandedSections] = useState(new Set())
 
-  // Fetch all FAQ sections
+  // Fetch all FAQ sections (normalize: API may return Axios response or { data/sections } body)
   const fetchFAQs = useCallback(async () => {
     if (!projectId) return
     try {
       setLoading(true)
-      const data = await portalApi.get(`/seo/managed/faqs/project/${projectId}`)
-      setFaqSections(data || [])
+      setNetworkError(false)
+      const res = await portalApi.get(`/seo/managed/faqs/project/${projectId}`)
+      const raw = res?.data ?? res
+      const list = Array.isArray(raw) ? raw : (raw?.sections ?? raw?.data ?? [])
+      setFaqSections(Array.isArray(list) ? list : [])
     } catch (err) {
       console.error('Failed to fetch FAQs:', err)
-      toast.error('Failed to load FAQs')
+      if (isNetworkError(err)) {
+        setNetworkError(true)
+        toast.error('Portal API unreachable. Make sure the backend is running (e.g. localhost:3002).')
+      } else {
+        toast.error(err?.response?.data?.message ?? 'Failed to load FAQs')
+      }
     } finally {
       setLoading(false)
     }
@@ -93,8 +110,11 @@ export default function SEOManagedFAQs({ projectId }) {
     fetchFAQs()
   }, [fetchFAQs])
 
+  // Ensure array (handles stale state or raw API shape)
+  const faqList = Array.isArray(faqSections) ? faqSections : (faqSections?.sections ?? faqSections?.data ?? [])
+
   // Filter sections by search
-  const filteredSections = faqSections.filter(section => {
+  const filteredSections = faqList.filter(section => {
     if (!search) return true
     const searchLower = search.toLowerCase()
     return (
@@ -122,9 +142,9 @@ export default function SEOManagedFAQs({ projectId }) {
 
   // Stats
   const stats = {
-    total: faqSections.length,
-    published: faqSections.filter(s => s.is_published).length,
-    totalItems: faqSections.reduce((sum, s) => sum + (s.items?.length || 0), 0),
+    total: faqList.length,
+    published: faqList.filter(s => s.is_published).length,
+    totalItems: faqList.reduce((sum, s) => sum + (s.items?.length || 0), 0),
   }
 
   if (loading) {
@@ -134,6 +154,28 @@ export default function SEOManagedFAQs({ projectId }) {
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-32 w-full" />
       </div>
+    )
+  }
+
+  if (networkError) {
+    return (
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <FileQuestion className="h-5 w-5" />
+            Portal API unreachable
+          </CardTitle>
+          <CardDescription>
+            The backend is not running or not reachable. Start the Portal API (e.g. on localhost:3002) and try again.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={fetchFAQs} variant="outline">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
     )
   }
 
@@ -223,6 +265,7 @@ export default function SEOManagedFAQs({ projectId }) {
           onOpenChange={(open) => !open && setEditingSection(null)}
           section={editingSection}
           onUpdated={fetchFAQs}
+          projectId={projectId}
         />
       )}
     </div>
@@ -524,7 +567,7 @@ function CreateFAQModal({ open, onOpenChange, projectId, onCreated }) {
 }
 
 // Edit FAQ Modal with inline Q&A editing
-function EditFAQModal({ open, onOpenChange, section, onUpdated }) {
+function EditFAQModal({ open, onOpenChange, section, onUpdated, projectId }) {
   const [title, setTitle] = useState(section.title || '')
   const [description, setDescription] = useState(section.description || '')
   const [includeSchema, setIncludeSchema] = useState(section.include_schema)
@@ -532,6 +575,10 @@ function EditFAQModal({ open, onOpenChange, section, onUpdated }) {
   const [saving, setSaving] = useState(false)
   const [newQuestion, setNewQuestion] = useState('')
   const [newAnswer, setNewAnswer] = useState('')
+  
+  // AI Suggestion state
+  const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false)
+  const [suggestions, setSuggestions] = useState([])
 
   const handleSave = async () => {
     try {
@@ -550,6 +597,51 @@ function EditFAQModal({ open, onOpenChange, section, onUpdated }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  // Generate AI suggestions
+  const handleGenerateSuggestions = async () => {
+    if (!projectId) {
+      toast.error('Project ID required')
+      return
+    }
+    
+    setIsGeneratingSuggestions(true)
+    setSuggestions([])
+    
+    try {
+      const existingQuestions = items.map(i => i.question)
+      const result = await signalSeoApi.suggestFAQs(projectId, section.path, {
+        count: 5,
+        existingFaqs: existingQuestions,
+      })
+      
+      if (result?.suggestions?.length) {
+        setSuggestions(result.suggestions)
+        toast.success(`Generated ${result.suggestions.length} FAQ suggestions`)
+      } else {
+        toast.info('No suggestions generated. Try adding more content to this page.')
+      }
+    } catch (err) {
+      console.error('Failed to generate suggestions:', err)
+      toast.error('Failed to generate AI suggestions')
+    } finally {
+      setIsGeneratingSuggestions(false)
+    }
+  }
+
+  // Add a suggestion to items
+  const addSuggestion = (suggestion) => {
+    const newItem = {
+      id: crypto.randomUUID(),
+      question: suggestion.question,
+      answer: suggestion.answer,
+      order: items.length,
+      is_visible: true,
+    }
+    setItems([...items, newItem])
+    setSuggestions(suggestions.filter(s => s.question !== suggestion.question))
+    toast.success('FAQ added')
   }
 
   const addItem = () => {
@@ -634,8 +726,58 @@ function EditFAQModal({ open, onOpenChange, section, onUpdated }) {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Label>Questions & Answers</Label>
-                <Badge variant="outline">{items.length} items</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{items.length} items</Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleGenerateSuggestions}
+                    disabled={isGeneratingSuggestions}
+                    className="gap-2"
+                  >
+                    {isGeneratingSuggestions ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <SignalIcon className="h-4 w-4" />
+                    )}
+                    {isGeneratingSuggestions ? 'Generating...' : 'Signal Suggestions'}
+                  </Button>
+                </div>
               </div>
+
+              {/* AI Suggestions */}
+              {suggestions.length > 0 && (
+                <div className="space-y-3 p-4 rounded-lg border-2 border-dashed" style={{ borderColor: 'var(--brand-primary)', backgroundColor: 'color-mix(in srgb, var(--brand-primary) 5%, transparent)' }}>
+                  <div className="flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--brand-primary)' }}>
+                    <SignalIcon className="h-4 w-4" />
+                    Signal Suggestions ({suggestions.length})
+                  </div>
+                  {suggestions.map((suggestion, index) => (
+                    <div key={index} className="p-3 rounded-lg bg-background border">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 space-y-1">
+                          <p className="text-sm font-medium">{suggestion.question}</p>
+                          <p className="text-xs text-muted-foreground line-clamp-2">{suggestion.answer}</p>
+                          {suggestion.confidence && (
+                            <Badge variant="outline" className="text-xs">
+                              {Math.round(suggestion.confidence * 100)}% confidence
+                            </Badge>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => addSuggestion(suggestion)}
+                          className="shrink-0"
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Existing Items */}
               <div className="space-y-3">

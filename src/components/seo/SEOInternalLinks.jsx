@@ -1,9 +1,19 @@
 // src/components/seo/SEOInternalLinks.jsx
 // Internal Linking Analysis - optimize site structure and PageRank flow
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { useSeoInternalLinks, useCreateSeoInternalLink } from '@/hooks/seo'
 import { useSignalAccess } from '@/lib/signal-access'
 import SignalUpgradeCard from './signal/SignalUpgradeCard'
+import { seoApi } from '@/lib/portal-api'
+import { signalSeoApi } from '@/lib/signal-api'
+import { useQueryClient } from '@tanstack/react-query'
+import { seoTechnicalKeys } from '@/hooks/seo'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +31,7 @@ import {
 
 export default function SEOInternalLinks({ projectId }) {
   const { hasAccess: hasSignalAccess } = useSignalAccess()
+  const queryClient = useQueryClient()
 
   // Show upgrade prompt if no Signal access
   if (!hasSignalAccess) {
@@ -31,25 +42,27 @@ export default function SEOInternalLinks({ projectId }) {
     )
   }
 
-  const { 
-    internalLinksAnalysis, 
-    internalLinksLoading, 
-    fetchInternalLinksAnalysis,
-    analyzeInternalLinks 
-  } = useSeoStore()
+  // React Query hooks
+  const { data: linksData, isLoading: internalLinksLoading } = useSeoInternalLinks(projectId)
+  
+  // Extract data
+  const internalLinksAnalysis = linksData?.analysis || linksData || {}
   
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-
-  useEffect(() => {
-    if (projectId) {
-      fetchInternalLinksAnalysis(projectId)
-    }
-  }, [projectId])
+  const [signalSuggestions, setSignalSuggestions] = useState(null)
 
   const handleAnalyze = async () => {
     setIsAnalyzing(true)
+    setSignalSuggestions(null)
     try {
-      await analyzeInternalLinks(projectId)
+      await seoApi.recalculateInternalLinks(projectId)
+      queryClient.invalidateQueries({ queryKey: seoTechnicalKeys.links(projectId) })
+      try {
+        const data = await signalSeoApi.analyzeInternalLinks(projectId, null)
+        if (data && !data.error) setSignalSuggestions(data?.suggestions ?? data)
+      } catch (signalErr) {
+        console.warn('Signal internal links suggestions unavailable:', signalErr)
+      }
     } catch (error) {
       console.error('Internal links analysis error:', error)
     }

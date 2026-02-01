@@ -1,8 +1,14 @@
 // src/components/seo/SEOBlogBrain.jsx
 // AI-powered blog content intelligence integrated with SEO knowledge base
 
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useState } from 'react'
+import { useProject } from '@/lib/hooks/use-project'
+import {
+  useBlogTopicRecommendations,
+  useAnalyzeAllBlogPosts,
+  useFixBlogPostEmDashes,
+  useOptimizeBlogPost
+} from '@/lib/hooks/use-seo'
 import { useSignalAccess } from '@/lib/signal-access'
 import SignalUpgradeCard from './signal/SignalUpgradeCard'
 import SignalIcon from '@/components/ui/SignalIcon'
@@ -49,41 +55,27 @@ export default function SEOBlogBrain({ projectId }) {
   const [activeTab, setActiveTab] = useState('topics')
   const [selectedPost, setSelectedPost] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
-  
-  const {
-    blogTopicRecommendations,
-    blogPostAnalysis,
-    blogOptimizationResults,
-    blogBrainLoading,
-    blogBrainError,
-    fetchBlogTopicRecommendations,
-    analyzeBlogPost,
-    analyzeAllBlogPosts,
-    fixAllBlogPostEmDashes,
-    optimizeBlogPost,
-    addBlogPostCitations
-  } = useSeoStore()
-
   const [allPostsAnalysis, setAllPostsAnalysis] = useState(null)
   const [fixingEmDashes, setFixingEmDashes] = useState(false)
-
-  // Load topic recommendations on mount
-  useEffect(() => {
-    if (projectId && activeTab === 'topics') {
-      fetchBlogTopicRecommendations(projectId)
-    }
-  }, [projectId, activeTab])
-
-  // Load all posts analysis when switching to audit tab
-  useEffect(() => {
-    if (activeTab === 'audit' && !allPostsAnalysis) {
-      loadAllPostsAnalysis()
-    }
-  }, [activeTab])
+  
+  // React Query hooks
+  const { 
+    data: blogTopicRecommendations = [], 
+    isLoading: topicsLoading,
+    refetch: refetchTopics
+  } = useBlogTopicRecommendations(projectId, {
+    enabled: activeTab === 'topics'
+  })
+  
+  const analyzeAllPostsMutation = useAnalyzeAllBlogPosts()
+  const fixEmDashesMutation = useFixBlogPostEmDashes()
+  const optimizePostMutation = useOptimizeBlogPost()
+  
+  const blogBrainLoading = topicsLoading || analyzeAllPostsMutation.isPending
 
   const loadAllPostsAnalysis = async () => {
     try {
-      const result = await analyzeAllBlogPosts()
+      const result = await analyzeAllPostsMutation.mutateAsync({ projectId })
       setAllPostsAnalysis(result)
     } catch (error) {
       console.error('Failed to analyze posts:', error)
@@ -93,7 +85,7 @@ export default function SEOBlogBrain({ projectId }) {
   const handleFixAllEmDashes = async () => {
     setFixingEmDashes(true)
     try {
-      const result = await fixAllBlogPostEmDashes()
+      const result = await fixEmDashesMutation.mutateAsync({ projectId })
       // Reload analysis after fix
       await loadAllPostsAnalysis()
       alert(`Fixed ${result.fixed} posts with em dashes!`)
@@ -106,7 +98,7 @@ export default function SEOBlogBrain({ projectId }) {
 
   const handleOptimizePost = async (postId) => {
     try {
-      await optimizeBlogPost(postId, { applyChanges: false })
+      await optimizePostMutation.mutateAsync({ postId, projectId, options: { applyChanges: false } })
     } catch (error) {
       console.error('Failed to optimize post:', error)
     }
@@ -171,11 +163,11 @@ export default function SEOBlogBrain({ projectId }) {
                   </CardDescription>
                 </div>
                 <Button 
-                  onClick={() => fetchBlogTopicRecommendations(projectId)}
-                  disabled={blogBrainLoading}
+                  onClick={() => refetchTopics()}
+                  disabled={topicsLoading}
                   variant="outline"
                 >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${blogBrainLoading ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`w-4 h-4 mr-2 ${topicsLoading ? 'animate-spin' : ''}`} />
                   Refresh
                 </Button>
               </div>
@@ -392,10 +384,10 @@ export default function SEOBlogBrain({ projectId }) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Wand2 className="w-5 h-5 text-purple-500" />
-                AI Post Optimizer
+                Signal Post Optimizer
               </CardTitle>
               <CardDescription>
-                Select a post to analyze and optimize with AI assistance
+                Select a post to analyze and optimize with Signal
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -513,7 +505,7 @@ export default function SEOBlogBrain({ projectId }) {
                 Writing Guidelines
               </CardTitle>
               <CardDescription>
-                Style rules enforced by the AI Blog Brain
+                Style rules enforced by the Signal Blog
               </CardDescription>
             </CardHeader>
             <CardContent>

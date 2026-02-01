@@ -1,15 +1,16 @@
 // src/pages/commerce/CommerceDashboard.jsx
 // Unified Commerce Dashboard - Liquid Glass design with sidebar and multiple views
 // Dark theme compatible, renders as rounded tile inside MainLayout
+// MIGRATED TO REACT QUERY HOOKS - Jan 29, 2026
 
 import { useState, useEffect, useMemo } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import useAuthStore from '@/lib/auth-store'
 import { supabase } from '@/lib/supabase'
 import { useBrandColors } from '@/hooks/useBrandColors'
-import { useCommerceStore, getOfferings, getCommerceDashboard } from '@/lib/commerce-store'
-import portalApi from '@/lib/portal-api'
+import { useCommerceSettings, useCommerceDashboard, useCommerceOfferings, useCommerceOffering, commerceKeys } from '@/lib/hooks'
+import { useQueryClient } from '@tanstack/react-query'
+import portalApi, { commerceApi } from '@/lib/portal-api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -55,7 +56,6 @@ import {
   Receipt,
   BarChart3,
   Wallet,
-  PanelLeftClose,
   ShoppingBag,
   CloudOff,
   Tag,
@@ -64,6 +64,7 @@ import {
   Cloud,
   Send,
   AlertTriangle,
+  Folder,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -91,15 +92,21 @@ import OfferingCreate from './OfferingCreate'
 import ProjectIntegrationsDialog from '@/components/projects/ProjectIntegrationsDialog'
 import OfferingDetail from './OfferingDetail'
 import OfferingEdit from './OfferingEdit'
+import { ModuleLayout } from '@/components/ModuleLayout'
+import { MODULE_ICONS } from '@/lib/module-icons'
 import { cn } from '@/lib/utils'
 import { format, subDays } from 'date-fns'
+
+async function getOfferings(projectId, params) {
+  const res = await commerceApi.getOfferings(projectId, params)
+  return res?.data ?? res ?? []
+}
 
 export default function CommerceDashboard({ onNavigate }) {
   const { currentProject, currentOrg } = useAuthStore()
   const brandColors = useBrandColors()
-  const { settings, fetchSettings, currentOffering } = useCommerceStore()
-  
   const projectId = currentProject?.id
+  const { data: settings, refetch: fetchSettings } = useCommerceSettings(projectId)
   
   // Detect if this is Uptrade Media agency org
   // Uptrade Media uses Billing API for invoices + system emails
@@ -123,6 +130,8 @@ export default function CommerceDashboard({ onNavigate }) {
   const [offeringId, setOfferingId] = useState(null)
   const [returnView, setReturnView] = useState('events')
   const [offeringMode, setOfferingMode] = useState('view')
+
+  const { data: currentOffering } = useCommerceOffering(offeringId)
   
   const [products, setProducts] = useState([])
   const [services, setServices] = useState([])
@@ -142,7 +151,6 @@ export default function CommerceDashboard({ onNavigate }) {
   const [invoicesError, setInvoicesError] = useState(null)
   const [transactionsError, setTransactionsError] = useState(null)
   const [viewMode, setViewMode] = useState('grid')
-  const [showSidebar, setShowSidebar] = useState(true)
   const [productsOpen, setProductsOpen] = useState(currentView === 'products')
   const [servicesOpen, setServicesOpen] = useState(currentView === 'services')
   const [eventsOpen, setEventsOpen] = useState(currentView === 'events')
@@ -236,11 +244,11 @@ export default function CommerceDashboard({ onNavigate }) {
     if (projectId) {
       loadStats()
       loadCategories()
-      fetchSettings(projectId).catch(err => {
+      fetchSettings().catch(err => {
         console.error('Failed to load commerce settings:', err)
       })
     }
-  }, [projectId])
+  }, [projectId, fetchSettings])
 
   async function loadCategories() {
     if (!projectId) return
@@ -368,10 +376,10 @@ export default function CommerceDashboard({ onNavigate }) {
     setTransactionsError(null)
     
     try {
-      // Get sales from the commerce API
-      const { getSales } = await import('@/lib/commerce-store')
-      const salesData = await getSales(projectId, { limit: 10 })
-      setTransactions(salesData || [])
+      const { commerceApi } = await import('@/lib/portal-api')
+      const response = await commerceApi.getSales(projectId, { params: { limit: 10 } })
+      const salesData = response?.data?.sales ?? response?.data?.data ?? response?.data ?? []
+      setTransactions(Array.isArray(salesData) ? salesData : [])
     } catch (err) {
       console.error('Failed to load transactions:', err)
       // If commerce_sales doesn't exist yet, show empty state
@@ -556,40 +564,9 @@ export default function CommerceDashboard({ onNavigate }) {
 
   return (
     <TooltipProvider>
-      <div className="h-[calc(100vh-120px)] flex flex-col bg-background overflow-hidden">
-        {/* Header */}
-        <div className="flex-shrink-0 h-14 border-b flex items-center justify-between px-4 bg-card/50">
-          <div className="flex items-center gap-4">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowSidebar(!showSidebar)}>
-                  <PanelLeftClose className={cn("h-4 w-4 transition-transform", !showSidebar && "rotate-180")} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{showSidebar ? 'Hide sidebar' : 'Show sidebar'}</TooltipContent>
-            </Tooltip>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--brand-primary)] to-[var(--brand-secondary)] flex items-center justify-center shadow-sm">
-                <ShoppingBag className="h-4 w-4 text-white" />
-              </div>
-              <span className="font-semibold text-lg">Commerce</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Content Body */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Sidebar */}
-          <AnimatePresence>
-            {showSidebar && (
-              <motion.aside
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 240, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                transition={{ duration: 0.2, ease: 'easeInOut' }}
-                className="border-r bg-muted/10 flex-shrink-0 overflow-hidden"
-              >
-            <ScrollArea className="h-full py-4">
+      <ModuleLayout
+        leftSidebar={
+          <ScrollArea className="h-full py-4">
           
           {/* Navigation Items */}
           <nav className="space-y-1 px-2">
@@ -1136,15 +1113,17 @@ export default function CommerceDashboard({ onNavigate }) {
               </div>
             </div>
           </div>
-            </ScrollArea>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto bg-[var(--surface-page)]/50">
+          </ScrollArea>
+        }
+        leftSidebarTitle="Commerce"
+        defaultLeftSidebarOpen
+        ariaLabel="Commerce module"
+      >
+        <ModuleLayout.Header title="Commerce" icon={MODULE_ICONS.commerce} />
+        <ModuleLayout.Content>
+          <main className="flex-1 overflow-auto min-h-0">
         {/* Header */}
-        <div className="bg-[var(--glass-bg-elevated)]/80 backdrop-blur-md border-b border-[var(--glass-border)] sticky top-0 z-10">
+        <div className="bg-card/80 backdrop-blur-sm border-b sticky top-0 z-10">
           <div className="px-6 py-4">
             <div className="flex items-center justify-between gap-4">
               {/* Title/Search based on view */}
@@ -1601,8 +1580,9 @@ export default function CommerceDashboard({ onNavigate }) {
             )
           )}
         </div>
-      </main>
-        </div>
+          </main>
+        </ModuleLayout.Content>
+      </ModuleLayout>
 
       {/* Create Invoice Dialog */}
       <InvoiceCreateDialog
@@ -1697,7 +1677,6 @@ export default function CommerceDashboard({ onNavigate }) {
           window.location.reload()
         }}
       />
-      </div>
     </TooltipProvider>
   )
 }

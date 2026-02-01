@@ -92,12 +92,13 @@ export default defineConfig(({ mode }) => {
 
     // Some libs reference process.env in the browser; this avoids undefined errors.
     // Also expose environment variables to the client
+    // Note: Vite auto-exposes VITE_ prefixed env vars, but we define some explicitly for compatibility
     define: {
       'process.env': {},
-      'import.meta.env.SQUARE_APPLICATION_ID': JSON.stringify(process.env.SQUARE_APPLICATION_ID),
-      'import.meta.env.SQUARE_LOCATION_ID': JSON.stringify(process.env.SQUARE_LOCATION_ID),
-      'import.meta.env.SQUARE_ENVIRONMENT': JSON.stringify(process.env.SQUARE_ENVIRONMENT),
-      'import.meta.env.GOOGLE_CLOUD_API_KEY': JSON.stringify(process.env.GOOGLE_CLOUD_API_KEY),
+      'import.meta.env.SQUARE_APPLICATION_ID': JSON.stringify(process.env.SQUARE_APPLICATION_ID || process.env.VITE_SQUARE_APPLICATION_ID),
+      'import.meta.env.SQUARE_LOCATION_ID': JSON.stringify(process.env.SQUARE_LOCATION_ID || process.env.VITE_SQUARE_LOCATION_ID),
+      'import.meta.env.SQUARE_ENVIRONMENT': JSON.stringify(process.env.SQUARE_ENVIRONMENT || process.env.VITE_SQUARE_ENVIRONMENT),
+      // Removed VITE_GOOGLE_CLOUD_API_KEY - now proxied through Portal API for security
     },
   }
 })

@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useSeoStore } from '@/lib/seo-store'
+import { useSeoPages } from '@/lib/hooks'
 import useAuthStore from '@/lib/auth-store'
 import { portalApi } from '@/lib/portal-api'
 import {
@@ -27,10 +27,10 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from '@/lib/toast'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import {
   Sparkles,
   Globe,
-  Loader2,
   Search,
   ArrowRight,
   ArrowLeft,
@@ -118,20 +118,20 @@ function generateLocalFallback(pageData) {
 export default function CreateWithSignalDialog({ open, onOpenChange, embedded = false, onBack, onSuccess }) {
   const navigate = useNavigate()
   const { currentProject } = useAuthStore()
-  const { pages: seoPages, fetchPages, pagesLoading } = useSeoStore()
+  
+  // Use React Query hook for SEO pages
+  const { data: pagesData, isLoading: pagesLoading } = useSeoPages(
+    currentProject?.id,
+    { limit: 200 },
+    { enabled: (open || embedded) && !!currentProject?.id }
+  )
+  const seoPages = pagesData?.pages || []
   
   const [selectedPageId, setSelectedPageId] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedService, setGeneratedService] = useState(null)
   const [step, setStep] = useState('select') // 'select' | 'generating' | 'review'
-
-  // Load SEO pages on open/mount
-  useEffect(() => {
-    if ((open || embedded) && currentProject?.id) {
-      fetchPages(currentProject.id, { limit: 200 })
-    }
-  }, [open, embedded, currentProject?.id, fetchPages])
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -273,7 +273,7 @@ export default function CreateWithSignalDialog({ open, onOpenChange, embedded = 
               <ScrollArea className={embedded ? "h-[400px]" : "max-h-[400px]"}>
                 {pagesLoading ? (
                   <div className="flex items-center justify-center p-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    <UptradeSpinner size="md" className="[&_p]:hidden [&_svg]:text-muted-foreground" />
                   </div>
                 ) : servicePages.length === 0 ? (
                   <div className="p-8 text-center text-muted-foreground">

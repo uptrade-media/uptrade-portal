@@ -4,7 +4,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { 
   Globe, 
-  Loader2, 
   Upload, 
   X, 
   ArrowLeft,
@@ -16,6 +15,7 @@ import {
   Pause,
   Check
 } from 'lucide-react'
+import { UptradeSpinner } from '@/components/UptradeLoading'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,13 +30,13 @@ import {
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import useAuthStore from '@/lib/auth-store'
-import useAffiliatesStore from '@/lib/affiliates-store'
+import { useCreateAffiliate } from '@/lib/hooks'
 import { useBrandColors } from '@/hooks/useBrandColors'
 import { toast } from 'sonner'
 
 export default function CreateAffiliateForm({ onCancel, onSuccess }) {
   const { currentProject } = useAuthStore()
-  const { createAffiliate } = useAffiliatesStore()
+  const createAffiliateMutation = useCreateAffiliate()
   const { primary, toRgba } = useBrandColors()
   const fileInputRef = useRef(null)
 
@@ -175,7 +175,7 @@ export default function CreateAffiliateForm({ onCancel, onSuccess }) {
 
     setIsSubmitting(true)
     try {
-      await createAffiliate(currentProject.id, formData)
+      await createAffiliateMutation.mutateAsync({ projectId: currentProject.id, data: formData })
       toast.success('Affiliate created')
       onSuccess?.()
     } catch (error) {
@@ -265,8 +265,7 @@ export default function CreateAffiliateForm({ onCancel, onSuccess }) {
               >
                 {isUploadingLogo ? (
                   <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Uploading...</p>
+                    <UptradeSpinner size="md" label="Uploading..." />
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3">
@@ -336,7 +335,9 @@ export default function CreateAffiliateForm({ onCancel, onSuccess }) {
                 className="pl-9 h-11"
               />
               {isFetchingLogo && (
-                <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-muted-foreground" />
+                <span className="absolute right-3 top-3">
+                  <UptradeSpinner size="sm" className="[&_p]:hidden [&_svg]:!h-4 [&_svg]:!w-4" />
+                </span>
               )}
             </div>
           </div>
@@ -397,20 +398,12 @@ export default function CreateAffiliateForm({ onCancel, onSuccess }) {
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || !formData.name.trim()}
+              loading={isSubmitting}
+              disabled={!formData.name.trim()}
               style={{ backgroundColor: primary }}
             >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                <>
-                  <Link2 className="h-4 w-4 mr-2" />
-                  Create Affiliate
-                </>
-              )}
+              <Link2 className="h-4 w-4 mr-2" />
+              {isSubmitting ? 'Creating...' : 'Create Affiliate'}
             </Button>
           </div>
         </form>

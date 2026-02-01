@@ -167,13 +167,88 @@ function getPageMetadata(): Record<string, any> {
     return text.split(/\s+/).filter(w => w.length > 0).length
   }
   
-  const getImageStats = (): { count: number; withoutAlt: number } => {
-    const images = document.querySelectorAll('img')
+  interface PageImageReport {
+    src: string
+    alt: string | null
+    elementType: 'img' | 'Image' | 'ManagedImage' | 'picture' | 'background'
+    slotId?: string
+    position: 'hero' | 'content' | 'sidebar' | 'footer' | 'header' | 'unknown'
+    width?: number
+    height?: number
+    surroundingText?: string
+  }
+
+  // Helper to determine element position in page
+  const getElementPosition = (el: Element): PageImageReport['position'] => {
+    let current: Element | null = el
+    while (current) {
+      const tag = current.tagName?.toLowerCase()
+      const role = current.getAttribute('role')
+      const className = current.className?.toString?.() || ''
+      
+      // Check for hero sections
+      if (className.includes('hero') || current.id?.includes('hero')) return 'hero'
+      if (tag === 'header' || role === 'banner') return 'header'
+      if (tag === 'nav' || role === 'navigation') return 'header'
+      if (tag === 'footer' || role === 'contentinfo') return 'footer'
+      if (tag === 'aside' || role === 'complementary') return 'sidebar'
+      if (tag === 'main' || tag === 'article' || role === 'main') return 'content'
+      
+      current = current.parentElement
+    }
+    return 'unknown'
+  }
+
+  // Get surrounding text context for an image
+  const getSurroundingText = (el: Element): string => {
+    // Find closest paragraph, figcaption, or container
+    const container = el.closest('figure, p, div, section, article')
+    if (!container) return ''
+    
+    // Get text excluding script/style content
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() || ''
+    return text.slice(0, 300) // Limit to 300 chars
+  }
+
+  const getImageDetails = (): PageImageReport[] => {
+    const images = document.querySelectorAll('img, [data-managed-image]')
+    const seen = new Set<string>()
+    const results: PageImageReport[] = []
+    
+    images.forEach(el => {
+      const img = el as HTMLImageElement
+      const src = img.getAttribute('src') || img.getAttribute('data-src') || ''
+      
+      // Skip duplicates, data URIs, and empty src
+      if (!src || src.startsWith('data:') || seen.has(src)) return
+      seen.add(src)
+      
+      // Detect if it's a ManagedImage
+      const slotId = img.getAttribute('data-slot-id') || undefined
+      const isManagedImage = img.hasAttribute('data-managed-image') || !!slotId
+      
+      results.push({
+        src,
+        alt: img.alt || null,
+        elementType: isManagedImage ? 'ManagedImage' : 'img',
+        slotId,
+        position: getElementPosition(img),
+        width: img.naturalWidth || parseInt(img.getAttribute('width') || '0') || undefined,
+        height: img.naturalHeight || parseInt(img.getAttribute('height') || '0') || undefined,
+        surroundingText: getSurroundingText(img),
+      })
+    })
+    
+    return results
+  }
+
+  const getImageStats = (): { count: number; withoutAlt: number; images: PageImageReport[] } => {
+    const images = getImageDetails()
     let withoutAlt = 0
     images.forEach(img => {
       if (!img.alt || img.alt.trim() === '') withoutAlt++
     })
-    return { count: images.length, withoutAlt }
+    return { count: images.length, withoutAlt, images }
   }
   
   interface InternalLink {
@@ -260,9 +335,203 @@ function getPageMetadata(): Record<string, any> {
     
     return { internal, external, internalLinks }
   }
+
+  // ============================================
+  // Content Extraction for Signal AI Analysis
+  // ============================================
+  
+  interface HeadingInfo {
+    level: number
+    text: string
+    id?: string
+  }
+
+  interface ContentSection {
+    heading?: string
+    headingLevel?: number
+    text: string
+    wordCount: number
+  }
+
+  interface FAQItem {
+    question: string
+    answer: string
+  }
+
+  const getHeadingStructure = (): HeadingInfo[] => {
+    const headings: HeadingInfo[] = []
+    const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6')
+    
+    elements.forEach(el => {
+      const level = parseInt(el.tagName[1])
+      const text = el.textContent?.trim() || ''
+      if (text) {
+        headings.push({
+          level,
+          text: text.slice(0, 200), // Limit length
+          id: el.id || undefined
+        })
+      }
+    })
+    
+    return headings
+  }
+
+  const getContentText = (): { text: string; hash: string } => {
+    // Get main content area
+    const main = document.querySelector('main, article, [role="main"]') || document.body
+    
+    // Clone to avoid modifying the page
+    const clone = main.cloneNode(true) as Element
+    
+    // Remove script, style, nav, header, footer from clone
+    clone.querySelectorAll('script, style, nav, header, footer, [role="navigation"], [role="banner"], [role="contentinfo"]').forEach(el => el.remove())
+    
+    // Get clean text
+    let text = clone.textContent || ''
+    text = text.replace(/\s+/g, ' ').trim()
+    
+    // Limit to 10KB for storage
+    text = text.slice(0, 10000)
+    
+    // Simple hash for change detection
+    let hash = 0
+    for (let i = 0; i < text.length; i++) {
+      const chr = text.charCodeAt(i)
+      hash = ((hash << 5) - hash) + chr
+      hash |= 0
+    }
+    
+    return { text, hash: hash.toString(16) }
+  }
+
+  const getContentSections = (): ContentSection[] => {
+    const sections: ContentSection[] = []
+    const main = document.querySelector('main, article, [role="main"]') || document.body
+    
+    // Find all heading + content pairs
+    const headings = main.querySelectorAll('h1, h2, h3')
+    
+    headings.forEach((heading, idx) => {
+      const headingText = heading.textContent?.trim() || ''
+      const level = parseInt(heading.tagName[1])
+      
+      // Get content between this heading and the next
+      let content = ''
+      let sibling = heading.nextElementSibling
+      
+      while (sibling && !['H1', 'H2', 'H3'].includes(sibling.tagName)) {
+        if (sibling.tagName === 'P' || sibling.tagName === 'UL' || sibling.tagName === 'OL' || sibling.tagName === 'DIV') {
+          content += (sibling.textContent || '') + ' '
+        }
+        sibling = sibling.nextElementSibling
+      }
+      
+      content = content.replace(/\s+/g, ' ').trim().slice(0, 1000)
+      const wordCount = content.split(/\s+/).filter(w => w.length > 0).length
+      
+      if (content && wordCount > 10) {
+        sections.push({
+          heading: headingText.slice(0, 200),
+          headingLevel: level,
+          text: content,
+          wordCount
+        })
+      }
+    })
+    
+    return sections.slice(0, 20) // Limit to 20 sections
+  }
+
+  const detectFAQContent = (): FAQItem[] => {
+    const faqs: FAQItem[] = []
+    
+    // Look for FAQ schema
+    const scripts = document.querySelectorAll('script[type="application/ld+json"]')
+    scripts.forEach(script => {
+      try {
+        const data = JSON.parse(script.textContent || '')
+        if (data['@type'] === 'FAQPage' && data.mainEntity) {
+          data.mainEntity.forEach((item: any) => {
+            if (item['@type'] === 'Question') {
+              faqs.push({
+                question: item.name?.slice(0, 200) || '',
+                answer: (item.acceptedAnswer?.text || '').slice(0, 500)
+              })
+            }
+          })
+        }
+      } catch { /* ignore parse errors */ }
+    })
+    
+    // Look for common FAQ patterns in HTML
+    if (faqs.length === 0) {
+      // details/summary pattern
+      const details = document.querySelectorAll('details')
+      details.forEach(detail => {
+        const summary = detail.querySelector('summary')
+        if (summary) {
+          const question = summary.textContent?.trim() || ''
+          const answer = detail.textContent?.replace(question, '').trim().slice(0, 500) || ''
+          if (question && answer) {
+            faqs.push({ question: question.slice(0, 200), answer })
+          }
+        }
+      })
+      
+      // Accordion pattern (common class names)
+      const accordionItems = document.querySelectorAll('[class*="accordion"], [class*="faq"], [data-faq]')
+      accordionItems.forEach(item => {
+        const questionEl = item.querySelector('[class*="question"], [class*="title"], button, h3, h4')
+        const answerEl = item.querySelector('[class*="answer"], [class*="content"], [class*="panel"], p')
+        if (questionEl && answerEl) {
+          const question = questionEl.textContent?.trim() || ''
+          const answer = answerEl.textContent?.trim().slice(0, 500) || ''
+          if (question && answer && question.includes('?')) {
+            faqs.push({ question: question.slice(0, 200), answer })
+          }
+        }
+      })
+    }
+    
+    return faqs.slice(0, 20) // Limit to 20 FAQs
+  }
+
+  const detectLists = (): { type: 'ul' | 'ol'; items: string[] }[] => {
+    const lists: { type: 'ul' | 'ol'; items: string[] }[] = []
+    const main = document.querySelector('main, article, [role="main"]') || document.body
+    
+    main.querySelectorAll('ul, ol').forEach(list => {
+      const type = list.tagName.toLowerCase() as 'ul' | 'ol'
+      const items: string[] = []
+      
+      list.querySelectorAll(':scope > li').forEach(li => {
+        const text = li.textContent?.trim().slice(0, 200) || ''
+        if (text) items.push(text)
+      })
+      
+      // Only include substantial lists (3+ items)
+      if (items.length >= 3) {
+        lists.push({ type, items: items.slice(0, 10) })
+      }
+    })
+    
+    return lists.slice(0, 10) // Limit to 10 lists
+  }
+
+  const estimateReadingTime = (wordCount: number): number => {
+    // Average reading speed: 200-250 words per minute
+    return Math.ceil(wordCount / 225)
+  }
   
   const imageStats = getImageStats()
   const linkStats = getLinkStats()
+  const headingStructure = getHeadingStructure()
+  const contentData = getContentText()
+  const contentSections = getContentSections()
+  const faqContent = detectFAQContent()
+  const listContent = detectLists()
+  const wordCount = getWordCount()
   
   return {
     metaDescription: getMeta('description'),
@@ -273,12 +542,23 @@ function getPageMetadata(): Record<string, any> {
     ogImage: getMeta('og:image'),
     h1: getH1(),
     h1Count: getH1Count(),
-    wordCount: getWordCount(),
+    wordCount,
     imagesCount: imageStats.count,
     imagesWithoutAlt: imageStats.withoutAlt,
+    images: imageStats.images, // Full image details for SEO optimization
     internalLinks: linkStats.internal,
     internalLinkTargets: linkStats.internalLinks, // Full link graph data
     externalLinks: linkStats.external,
+    // NEW: Content analysis data
+    content: {
+      text: contentData.text,
+      hash: contentData.hash,
+      headings: headingStructure,
+      sections: contentSections,
+      faqs: faqContent.length > 0 ? faqContent : undefined,
+      lists: listContent.length > 0 ? listContent : undefined,
+      readingTime: estimateReadingTime(wordCount),
+    },
   }
 }
 

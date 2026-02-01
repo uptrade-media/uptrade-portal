@@ -4,8 +4,18 @@
  * Used by both Analytics.jsx (site-wide) and AnalyticsPageView.jsx (per-page)
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
-import useSiteAnalyticsStore from '@/lib/site-analytics-store'
 import useAuthStore from '@/lib/auth-store'
+import {
+  useSiteAnalyticsOverview,
+  useSiteTopPages,
+  usePageViewsByDay,
+  usePageViewsByHour,
+  useWebVitals,
+  useSiteSessions,
+  useScrollDepth,
+  useHeatmap,
+  useSiteRealtimeAnalytics
+} from '@/lib/hooks'
 import {
   transformTrafficData,
   transformDeviceData,
@@ -26,113 +36,46 @@ export function useAnalytics({ path = null } = {}) {
   const { currentOrg, currentProject } = useAuthStore()
   const projectName = currentProject?.name || 'Your Site'
   const projectDomain = currentProject?.domain
+  const projectId = currentProject?.id
 
-  const {
-    overview,
-    topPages,
-    pageViewsByDay,
-    pageViewsByHour,
-    webVitals,
-    sessions,
-    scrollDepth,
-    heatmap,
-    isLoading,
-    error,
-    dateRange,
-    setDateRange,
-    fetchAllAnalytics,
-    fetchPageAnalytics,
-    setProjectId,
-    formatNumber,
-    formatDuration,
-    formatPercent,
-    clearError,
-    subscribeToAnalytics,
-    unsubscribeFromAnalytics,
-    realtimeConnected,
-    lastUpdated,
-    realtimeData,
-    fetchRealtime
-  } = useSiteAnalyticsStore()
-
-  const hasFetchedRef = useRef(false)
+  // Local state for date range
+  const [dateRange, setDateRange] = useState(30)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [projectReady, setProjectReady] = useState(false)
 
-  // Set project ID for analytics filtering
-  useEffect(() => {
-    if (currentProject?.id && setProjectId) {
-      setProjectId(currentProject.id)
-      setProjectReady(true)
-    } else if (!currentProject && setProjectId) {
-      setProjectId(null)
-      setProjectReady(true)
-    }
-  }, [currentProject?.id, setProjectId])
+  // When path is set, all overview/charts are scoped to that page
+  const pathOpt = path ? { path } : {}
 
-  // Initial data fetch - wait for project to be ready
-  useEffect(() => {
-    if (!projectReady) return
-    if (hasFetchedRef.current) return
-    hasFetchedRef.current = true
-    
-    if (path) {
-      // Fetch page-specific analytics
-      fetchPageAnalytics?.(path) ?? fetchAllAnalytics({ path })
-    } else {
-      fetchAllAnalytics()
-    }
-  }, [projectReady, path])
+  // React Query hooks for data fetching
+  const {
+    data: overview,
+    isLoading: overviewLoading,
+    error,
+    refetch: refetchOverview
+  } = useSiteAnalyticsOverview(projectId, dateRange, pathOpt)
 
-  // Refetch when date range changes
-  useEffect(() => {
-    if (hasFetchedRef.current) {
-      if (path) {
-        fetchPageAnalytics?.(path) ?? fetchAllAnalytics({ path })
-      } else {
-        fetchAllAnalytics()
-      }
-    }
-  }, [dateRange, path])
+  const { data: topPages, refetch: refetchTopPages } = useSiteTopPages(projectId, dateRange, 50)
+  const { data: pageViewsByDay, refetch: refetchByDay } = usePageViewsByDay(projectId, dateRange, pathOpt)
+  const { data: pageViewsByHour, refetch: refetchByHour } = usePageViewsByHour(projectId, dateRange, pathOpt)
+  const { data: webVitals, refetch: refetchWebVitals } = useWebVitals(projectId, dateRange, pathOpt)
+  const { data: sessions, refetch: refetchSessions } = useSiteSessions(projectId, dateRange)
+  const { data: scrollDepth, refetch: refetchScrollDepth } = useScrollDepth(projectId, dateRange, pathOpt)
+  const { data: heatmap } = useHeatmap(projectId, path)
+  const { data: realtimeData } = useSiteRealtimeAnalytics(projectId)
 
-  // Subscribe to realtime analytics updates
-  useEffect(() => {
-    if (!projectReady) return
-    
-    const projectId = currentProject?.id || null
-    subscribeToAnalytics(projectId)
-    
-    return () => {
-      unsubscribeFromAnalytics()
-    }
-  }, [projectReady, currentProject?.id])
-
-  // Poll realtime analytics for active visitors
-  useEffect(() => {
-    if (!projectReady) return
-    const projectId = currentProject?.id || null
-    if (!projectId) return
-
-    fetchRealtime(projectId)
-    const interval = setInterval(() => {
-      fetchRealtime(projectId)
-    }, 15000)
-
-    return () => clearInterval(interval)
-  }, [projectReady, currentProject?.id, fetchRealtime])
+  const isLoading = overviewLoading
 
   // Handle refresh
   const handleRefresh = async () => {
     setIsRefreshing(true)
-    if (path) {
-      await (fetchPageAnalytics?.(path) ?? fetchAllAnalytics({ path }))
-    } else {
-      await fetchAllAnalytics()
-    }
-    const projectId = currentProject?.id || null
-    if (projectId) {
-      await fetchRealtime(projectId)
-    }
+    await Promise.all([
+      refetchOverview(),
+      refetchTopPages(),
+      refetchByDay(),
+      refetchByHour(),
+      refetchWebVitals(),
+      refetchSessions(),
+      refetchScrollDepth()
+    ])
     setIsRefreshing(false)
   }
 
@@ -140,7 +83,30 @@ export function useAnalytics({ path = null } = {}) {
   const handleDateRangeChange = (range) => {
     if (range.preset) {
       setDateRange(range.days)
+    } else if (typeof range === 'number') {
+      setDateRange(range)
     }
+  }
+
+  // Formatters
+  const formatNumber = (num) => {
+    if (!num) return '0'
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+    return num.toString()
+  }
+
+  const formatDuration = (seconds) => {
+    if (!seconds || seconds <= 0) return '0s'
+    if (seconds < 60) return `${Math.round(seconds)}s`
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.round(seconds % 60)
+    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
+  }
+
+  const formatPercent = (value, total) => {
+    if (!total || total === 0) return '0%'
+    return `${((value / total) * 100).toFixed(1)}%`
   }
 
   // Extract and memoize transformed data
@@ -152,7 +118,7 @@ export function useAnalytics({ path = null } = {}) {
   // Memoized transformed data
   const trafficData = useMemo(() => transformTrafficData(dailyTrend), [dailyTrend])
   const deviceData = useMemo(() => transformDeviceData(overview?.deviceBreakdown), [overview?.deviceBreakdown])
-  const pagesData = useMemo(() => transformPagesData(topPages), [topPages])
+  const pagesData = useMemo(() => transformPagesData(topPages || []), [topPages])
   const hourlyData = useMemo(() => transformHourlyData(pageViewsByHour), [pageViewsByHour])
   const funnelData = useMemo(() => buildFunnelData(summary), [summary])
   const engagementData = useMemo(() => buildEngagementData(summary), [summary])
@@ -165,11 +131,14 @@ export function useAnalytics({ path = null } = {}) {
       return buildPageMetrics(summary, pageData, formatNumber, formatDuration)
     }
     return buildMetrics(summary, formatNumber, formatDuration)
-  }, [summary, path, pagesData, formatNumber, formatDuration])
+  }, [summary, path, pagesData])
 
   // Realtime data
   const realtimeActiveVisitors = realtimeData?.activeVisitors ?? summary.activeNow ?? 0
   const realtimeEvents = realtimeData?.recentEvents || []
+
+  // Clear error is a no-op with React Query (errors auto-clear on refetch)
+  const clearError = () => {}
 
   return {
     // Project info
@@ -182,7 +151,7 @@ export function useAnalytics({ path = null } = {}) {
     isRefreshing,
     error,
     dateRange,
-    projectReady,
+    projectReady: !!projectId,
     
     // Raw data
     overview,
@@ -205,15 +174,15 @@ export function useAnalytics({ path = null } = {}) {
     // Realtime
     realtimeActiveVisitors,
     realtimeEvents,
-    realtimeConnected,
-    lastUpdated,
+    realtimeConnected: !!realtimeData,
+    lastUpdated: realtimeData?.timestamp || null,
     
     // Handlers
     handleRefresh,
     handleDateRangeChange,
     setDateRange,
     clearError,
-    fetchAllAnalytics,
+    fetchAllAnalytics: handleRefresh,
     
     // Formatters
     formatNumber,

@@ -65,6 +65,16 @@ export function GridSkeleton({ columns = 2 }) {
   )
 }
 
+/** Chart-shaped skeleton for Tremor charts */
+export function ChartSkeleton({ className = 'h-64' } = {}) {
+  return (
+    <div
+      className={`animate-pulse rounded-lg bg-[var(--surface-tertiary)] ${className}`}
+      aria-hidden
+    />
+  )
+}
+
 export function DashboardSkeleton() {
   return (
     <div className="space-y-6 animate-pulse">

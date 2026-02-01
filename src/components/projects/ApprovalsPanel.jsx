@@ -26,7 +26,12 @@ import {
 } from '../ui/collapsible'
 import EmptyState from '../EmptyState'
 
-import useProjectsStore from '../../lib/projects-store'
+import {
+  usePendingApprovals,
+  useApproveItem,
+  useRejectItem,
+  useRequestApprovalChanges,
+} from '@/lib/hooks'
 
 const formatDate = (date) => {
   if (!date) return '—'
@@ -75,26 +80,20 @@ const typeLabels = {
 }
 
 const ApprovalsPanel = ({ projects }) => {
-  const {
-    pendingApprovals,
-    isLoading,
-    fetchPendingApprovals,
-    approveItem,
-    rejectItem,
-    requestChanges,
-  } = useProjectsStore()
-
-  // UI State
   const [selectedProjectId, setSelectedProjectId] = useState('all')
   const [actionDialog, setActionDialog] = useState({ open: false, type: null, item: null })
   const [actionNote, setActionNote] = useState('')
   const [expandedItems, setExpandedItems] = useState(new Set())
 
-  // Load approvals
-  useEffect(() => {
-    const projectId = selectedProjectId === 'all' ? null : selectedProjectId
-    fetchPendingApprovals(projectId)
-  }, [selectedProjectId])
+  const { data: pendingApprovalsData, isLoading } = usePendingApprovals()
+  const allApprovals = Array.isArray(pendingApprovalsData) ? pendingApprovalsData : (pendingApprovalsData?.approvals ?? pendingApprovalsData ?? [])
+  const pendingApprovals = selectedProjectId === 'all'
+    ? allApprovals
+    : allApprovals.filter((a) => (a.project_id || a.projectId) === selectedProjectId)
+
+  const approveItemMutation = useApproveItem()
+  const rejectItemMutation = useRejectItem()
+  const requestChangesMutation = useRequestApprovalChanges()
 
   // Toggle expansion
   const toggleExpanded = (itemId) => {
@@ -107,12 +106,14 @@ const ApprovalsPanel = ({ projects }) => {
     setExpandedItems(newExpanded)
   }
 
-  // Action handlers
   const handleApprove = async () => {
     if (!actionDialog.item) return
-    
     try {
-      await approveItem(actionDialog.item.id, actionNote || null)
+      await approveItemMutation.mutateAsync({
+        id: actionDialog.item.id,
+        type: actionDialog.item.item_type,
+        notes: actionNote || undefined,
+      })
       toast.success('Item approved')
       setActionDialog({ open: false, type: null, item: null })
       setActionNote('')
@@ -123,9 +124,12 @@ const ApprovalsPanel = ({ projects }) => {
 
   const handleReject = async () => {
     if (!actionDialog.item) return
-    
     try {
-      await rejectItem(actionDialog.item.id, actionNote || 'Rejected')
+      await rejectItemMutation.mutateAsync({
+        id: actionDialog.item.id,
+        type: actionDialog.item.item_type,
+        reason: actionNote || 'Rejected',
+      })
       toast.success('Item rejected')
       setActionDialog({ open: false, type: null, item: null })
       setActionNote('')
@@ -139,9 +143,11 @@ const ApprovalsPanel = ({ projects }) => {
       toast.error('Please provide feedback')
       return
     }
-    
     try {
-      await requestChanges(actionDialog.item.id, actionNote)
+      await requestChangesMutation.mutateAsync({
+        id: actionDialog.item.id,
+        feedback: actionNote,
+      })
       toast.success('Changes requested')
       setActionDialog({ open: false, type: null, item: null })
       setActionNote('')

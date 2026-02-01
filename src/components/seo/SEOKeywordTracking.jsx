@@ -1,7 +1,14 @@
 // src/components/seo/SEOKeywordTracking.jsx
 // Keyword Ranking Tracker - monitor keyword positions over time
-import { useState, useEffect } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+// MIGRATED TO REACT QUERY - Jan 29, 2026
+import { useState } from 'react'
+import { 
+  useSeoTrackedKeywords,
+  useSeoKeywordsSummary,
+  useTrackKeywords,
+  useAutoDiscoverKeywords,
+  useRefreshKeywordRankings
+} from '@/hooks/seo'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,55 +26,35 @@ import {
 } from 'lucide-react'
 
 export default function SEOKeywordTracking({ projectId }) {
-  const { 
-    trackedKeywords, 
-    keywordsSummary,
-    keywordsLoading, 
-    fetchTrackedKeywords,
-    trackKeywords,
-    autoDiscoverKeywords,
-    refreshKeywordRankings
-  } = useSeoStore()
+  // React Query hooks
+  const { data: keywordsData, isLoading: keywordsLoading } = useSeoTrackedKeywords(projectId)
+  const { data: keywordsSummary } = useSeoKeywordsSummary(projectId)
   
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [isDiscovering, setIsDiscovering] = useState(false)
+  // Mutations
+  const trackKeywordsMutation = useTrackKeywords()
+  const autoDiscoverMutation = useAutoDiscoverKeywords()
+  const refreshRankingsMutation = useRefreshKeywordRankings()
+  
+  // Extract data
+  const trackedKeywords = keywordsData?.keywords || keywordsData || []
+  
   const [newKeyword, setNewKeyword] = useState('')
   const [filter, setFilter] = useState('all')
 
-  useEffect(() => {
-    if (projectId) {
-      fetchTrackedKeywords(projectId)
-    }
-  }, [projectId])
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true)
-    try {
-      await refreshKeywordRankings(projectId)
-    } catch (error) {
-      console.error('Refresh error:', error)
-    }
-    setIsRefreshing(false)
+  const handleRefresh = () => {
+    refreshRankingsMutation.mutate(projectId)
   }
 
-  const handleAutoDiscover = async () => {
-    setIsDiscovering(true)
-    try {
-      await autoDiscoverKeywords(projectId)
-    } catch (error) {
-      console.error('Discovery error:', error)
-    }
-    setIsDiscovering(false)
+  const handleAutoDiscover = () => {
+    autoDiscoverMutation.mutate(projectId)
   }
 
-  const handleAddKeyword = async () => {
+  const handleAddKeyword = () => {
     if (!newKeyword.trim()) return
-    try {
-      await trackKeywords(projectId, [newKeyword.trim()])
-      setNewKeyword('')
-    } catch (error) {
-      console.error('Add keyword error:', error)
-    }
+    trackKeywordsMutation.mutate(
+      { projectId, keywords: [newKeyword.trim()] },
+      { onSuccess: () => setNewKeyword('') }
+    )
   }
 
   const getPositionChange = (keyword) => {
@@ -115,16 +102,16 @@ export default function SEOKeywordTracking({ projectId }) {
           <Button 
             variant="outline"
             onClick={handleAutoDiscover} 
-            disabled={isDiscovering}
+            disabled={autoDiscoverMutation.isLoading}
           >
-            <Search className={`mr-2 h-4 w-4 ${isDiscovering ? 'animate-pulse' : ''}`} />
-            {isDiscovering ? 'Discovering...' : 'Auto-Discover'}
+            <Search className={`mr-2 h-4 w-4 ${autoDiscoverMutation.isLoading ? 'animate-pulse' : ''}`} />
+            {autoDiscoverMutation.isLoading ? 'Discovering...' : 'Auto-Discover'}
           </Button>
           <Button 
             onClick={handleRefresh} 
-            disabled={isRefreshing || keywordsLoading}
+            disabled={refreshRankingsMutation.isLoading || keywordsLoading}
           >
-            <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`mr-2 h-4 w-4 ${refreshRankingsMutation.isLoading ? 'animate-spin' : ''}`} />
             Refresh Rankings
           </Button>
         </div>

@@ -348,14 +348,14 @@ export async function BlogPost({
         </div>
       )}
 
-      {/* FAQ Section */}
-      {post.faq_items && Array.isArray(post.faq_items) && post.faq_items.length > 0 && (
+      {/* FAQ Section (supports faq_items or faqItems from Portal / E-E-A-T) */}
+      {(post.faq_items ?? (post as any).faqItems) && Array.isArray(post.faq_items ?? (post as any).faqItems) && (post.faq_items ?? (post as any).faqItems).length > 0 && (
         <section style={{ marginTop: 48 }}>
           <h2 style={{ fontSize: 24, fontWeight: 600, marginBottom: 24 }}>
             Frequently Asked Questions
           </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {post.faq_items.map((faq: { question: string; answer: string }, index: number) => (
+            {(post.faq_items ?? (post as any).faqItems).map((faq: { question: string; answer: string }, index: number) => (
               <details
                 key={index}
                 style={{
@@ -380,9 +380,9 @@ export async function BlogPost({
         </section>
       )}
 
-      {/* Author Card */}
+      {/* Author Card (supports BlogAuthor or E-E-A-T author shape) */}
       {showAuthor && post.author && typeof post.author === 'object' && (
-        <AuthorSection author={post.author as BlogAuthor} />
+        <AuthorSection author={normalizeAuthorForDisplay(post.author)} />
       )}
 
       {/* Related Posts */}
@@ -442,10 +442,43 @@ export async function BlogPost({
 }
 
 // ============================================================================
+// AUTHOR NORMALIZATION (BlogAuthor + E-E-A-T shapes)
+// ============================================================================
+
+/** Normalize author from Portal: supports BlogAuthor (avatar_url, social_links) or E-E-A-T (image, url, socialProfiles) */
+function normalizeAuthorForDisplay(
+  author: Record<string, unknown> | BlogAuthor
+): BlogAuthor & { sameAs?: string[]; title?: string } {
+  const a = author as Record<string, unknown>
+  const avatarUrl =
+    (a.avatar_url as string) ?? (a.image as string) ?? (a.image_url as string)
+  const socialLinks = a.social_links as BlogAuthor['social_links'] | undefined
+  const socialProfiles = a.socialProfiles as string[] | undefined
+  return {
+    id: (a.id as string) ?? 'author',
+    project_id: (a.project_id as string) ?? '',
+    name: (a.name as string) ?? 'Author',
+    slug: (a.slug as string) ?? 'author',
+    bio: (a.bio as string) ?? undefined,
+    avatar_url: avatarUrl ?? undefined,
+    email: (a.email as string) ?? undefined,
+    website: (a.website as string) ?? (a.url as string) ?? undefined,
+    social_links: socialLinks ?? undefined,
+    is_active: (a.is_active as boolean) ?? true,
+    ...(socialProfiles?.length ? { sameAs: socialProfiles } : {}),
+    ...(a.title ? { title: a.title as string } : {}),
+  } as BlogAuthor & { sameAs?: string[]; title?: string }
+}
+
+// ============================================================================
 // AUTHOR SECTION
 // ============================================================================
 
-function AuthorSection({ author }: { author: BlogAuthor }) {
+function AuthorSection({
+  author,
+}: {
+  author: BlogAuthor & { sameAs?: string[]; title?: string }
+}) {
   return (
     <section
       style={{
@@ -474,6 +507,11 @@ function AuthorSection({ author }: { author: BlogAuthor }) {
         <h3 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600 }}>
           {author.name}
         </h3>
+        {'title' in author && author.title && (
+          <p style={{ margin: '0 0 4px', fontSize: 14, color: '#6b7280' }}>
+            {author.title}
+          </p>
+        )}
         {author.bio && (
           <p style={{ margin: '0 0 12px', color: '#6b7280', fontSize: 14 }}>
             {author.bio}
@@ -501,6 +539,21 @@ function AuthorSection({ author }: { author: BlogAuthor }) {
                 LinkedIn
               </a>
             )}
+          </div>
+        )}
+        {'sameAs' in author && author.sameAs && author.sameAs.length > 0 && !author.social_links && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            {author.sameAs.map((url, i) => (
+              <a
+                key={i}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#3b82f6', fontSize: 14 }}
+              >
+                Profile
+              </a>
+            ))}
           </div>
         )}
       </div>

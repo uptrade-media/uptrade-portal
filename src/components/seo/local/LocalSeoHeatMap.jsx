@@ -1,7 +1,11 @@
 // src/components/seo/local/LocalSeoHeatMap.jsx
 // Local SEO Heat Map - Google Maps integration with ranking grid overlay
+// MIGRATED TO REACT QUERY - Jan 29, 2026
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useSeoStore } from '@/lib/seo-store'
+import { useSeoHeatmap, useSeoLocalGrids, useSeoHeatMapData, seoLocalKeys } from '@/hooks/seo'
+import { seoApi } from '@/lib/portal-api'
+import { useQueryClient } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase-auth'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -17,19 +21,22 @@ import {
   CheckCircle,
   TrendingUp,
   TrendingDown,
-  Minus
+  Minus,
+  Play,
+  Loader2
 } from 'lucide-react'
 
-// Color scale for rankings - brand green for #1, through yellow to red
+// Color scale for rankings - brand colors for #1-3, semantic colors for lower ranks
+// Returns CSS variable or fallback color
 const getRankingColor = (position) => {
-  if (!position) return '#9ca3af' // Gray for not found
-  if (position === 1) return '#4bbf39' // Brand green - #1
-  if (position === 2) return '#6bc958' 
-  if (position === 3) return '#8bd377'
-  if (position <= 5) return '#fbbf24' // Yellow for 4-5
-  if (position <= 10) return '#f97316' // Orange for 6-10
-  if (position <= 15) return '#ef4444' // Red for 11-15
-  return '#dc2626' // Dark red for 16-20
+  if (!position) return 'var(--text-tertiary)' // Gray for not found
+  if (position === 1) return 'var(--brand-primary)' // Brand primary - #1
+  if (position === 2) return 'var(--brand-secondary)' // Brand secondary - #2
+  if (position === 3) return 'color-mix(in srgb, var(--brand-primary) 70%, var(--brand-secondary) 30%)' // Blend - #3
+  if (position <= 5) return 'var(--accent-yellow)' // Yellow for 4-5
+  if (position <= 10) return 'var(--accent-orange)' // Orange for 6-10
+  if (position <= 15) return 'var(--accent-red)' // Red for 11-15
+  return 'var(--accent-red-dark)' // Dark red for 16-20
 }
 
 // Get cell opacity based on data freshness
@@ -51,43 +58,77 @@ export default function LocalSeoHeatMap({ projectId }) {
   const [selectedKeyword, setSelectedKeyword] = useState(null)
   const [heatMapData, setHeatMapData] = useState([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isCrawling, setIsCrawling] = useState(false)
+  const [crawlStatus, setCrawlStatus] = useState(null) // { success, cellsCrawled, rankingsFound }
   const [showSettings, setShowSettings] = useState(false)
   const [selectedCell, setSelectedCell] = useState(null)
   const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false)
+  const [showNewGridDialog, setShowNewGridDialog] = useState(false)
 
-  const { 
-    localGrids,
-    fetchLocalGrids,
-    fetchHeatMapData,
-    localGridsLoading
-  } = useSeoStore()
+  // React Query hooks for local grids and heatmap data
+  const queryClient = useQueryClient()
+  const { data: localGridsData, isLoading: localGridsLoading, refetch: refetchLocalGrids } = useSeoLocalGrids(projectId)
+  
+  // API returns { grids: [...], total: N }, extract the array
+  const localGrids = localGridsData?.grids || []
 
-  // Load Google Maps script
+  // Normalize backend field (position) to frontend (ranking_position) for stats/display
+  // MUST be defined before useEffect hooks that reference it
+  const rank = (d) => d?.ranking_position ?? d?.position ?? null
+  const heatMapList = Array.isArray(heatMapData) ? heatMapData : []
+
+  // Load Google Maps script with API key from backend
   useEffect(() => {
     if (window.google?.maps) {
       setGoogleMapsLoaded(true)
       return
     }
 
-    const script = document.createElement('script')
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${import.meta.env.GOOGLE_CLOUD_API_KEY}&libraries=visualization`
-    script.async = true
-    script.defer = true
-    script.onload = () => setGoogleMapsLoaded(true)
-    script.onerror = () => console.error('Failed to load Google Maps')
-    document.head.appendChild(script)
+    const loadGoogleMaps = async () => {
+      try {
+        // Get Supabase session token
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token) {
+          console.error('No auth session available')
+          return
+        }
 
-    return () => {
-      // Cleanup if needed
+        // Fetch API key from backend (more secure than env var)
+        const apiUrl = import.meta.env.VITE_PORTAL_API_URL || 'https://api.uptrademedia.com'
+        const response = await fetch(`${apiUrl}/seo/config/maps-api-key`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        })
+        
+        if (!response.ok) {
+          console.warn('Maps API key not available, heat map will be disabled')
+          return
+        }
+        
+        const { api_key } = await response.json()
+        
+        if (!api_key) {
+          console.warn('Google Maps API key not configured, heat map will use fallback view')
+          return
+        }
+        
+        const script = document.createElement('script')
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${api_key}&libraries=visualization`
+        script.async = true
+        script.defer = true
+        script.onload = () => setGoogleMapsLoaded(true)
+        script.onerror = () => console.error('Failed to load Google Maps')
+        document.head.appendChild(script)
+      } catch (error) {
+        console.warn('Error loading Google Maps:', error)
+      }
     }
+
+    loadGoogleMaps()
   }, [])
 
-  // Fetch grids on mount
-  useEffect(() => {
-    if (projectId) {
-      fetchLocalGrids(projectId)
-    }
-  }, [projectId])
+  // Grids are now auto-fetched by React Query useSeoLocalGrids hook
 
   // Auto-select first grid
   useEffect(() => {
@@ -106,67 +147,137 @@ export default function LocalSeoHeatMap({ projectId }) {
     }
   }, [selectedGrid?.id, selectedKeyword])
 
-  // Initialize map when Google Maps is loaded
+  // Load marker library for AdvancedMarkerElement (optional; fall back to legacy Marker after timeout or on error)
+  const [markerLibraryLoaded, setMarkerLibraryLoaded] = useState(false)
   useEffect(() => {
-    if (googleMapsLoaded && mapRef.current && selectedGrid && !mapInstanceRef.current) {
+    if (!googleMapsLoaded || !window.google?.maps?.importLibrary) {
+      if (googleMapsLoaded) setMarkerLibraryLoaded(true)
+      return
+    }
+    let cancelled = false
+    const t = setTimeout(() => {
+      if (!cancelled) setMarkerLibraryLoaded(true)
+    }, 4000)
+    window.google.maps.importLibrary('marker').then(() => {
+      if (!cancelled) setMarkerLibraryLoaded(true)
+    }).catch(() => {
+      if (!cancelled) setMarkerLibraryLoaded(true)
+    })
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [googleMapsLoaded])
+
+  useEffect(() => {
+    if (googleMapsLoaded && markerLibraryLoaded && mapRef.current && selectedGrid && !mapInstanceRef.current) {
       initializeMap()
     }
-  }, [googleMapsLoaded, selectedGrid])
+  }, [googleMapsLoaded, markerLibraryLoaded, selectedGrid])
 
-  // Update overlays when data changes
+  // Update overlays when data changes OR when grid is selected (show empty grid)
   useEffect(() => {
-    if (mapInstanceRef.current && heatMapData.length > 0) {
+    if (mapInstanceRef.current && selectedGrid) {
       renderGridOverlay()
     }
-  }, [heatMapData])
+  }, [heatMapList, selectedGrid])
 
   const initializeMap = () => {
     if (!selectedGrid) return
 
-    const map = new window.google.maps.Map(mapRef.current, {
+    // Detect dark mode
+    const isDarkMode = document.documentElement.classList.contains('dark') ||
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+
+    // Theme-aware map styles
+    const mapStyles = isDarkMode ? [
+      { elementType: 'geometry', stylers: [{ color: '#1f2937' }] },
+      { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+      { elementType: 'labels.text.fill', stylers: [{ color: '#9ca3af' }] },
+      { elementType: 'labels.text.stroke', stylers: [{ color: '#1f2937' }] },
+      { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#374151' }] },
+      { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#111827' }] },
+    ] : [
+      { elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
+      { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+      { elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
+      { elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
+      { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+      { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
+    ]
+
+    // AdvancedMarkerElement requires mapId; omit mapId when using legacy Marker fallback
+    const useAdvancedMarkers = !!window.google.maps.marker?.AdvancedMarkerElement
+    const mapOptions = {
       center: { lat: Number(selectedGrid.center_lat), lng: Number(selectedGrid.center_lng) },
       zoom: 11,
       mapTypeId: 'roadmap',
-      styles: [
-        // Minimal light style for better overlay visibility
-        { elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
-        { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-        { elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
-        { elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
-        { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-        { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
-      ],
-      disableDefaultUI: false,
-      zoomControl: true,
+      styles: mapStyles,
+      // Lock the map - no zooming, panning, or interaction
+      disableDefaultUI: true,
+      zoomControl: false,
       mapTypeControl: false,
       streetViewControl: false,
-      fullscreenControl: true
-    })
+      fullscreenControl: false,
+      scrollwheel: false,
+      gestureHandling: 'none',
+      draggable: false,
+      disableDoubleClickZoom: true,
+      keyboardShortcuts: false,
+    }
+    if (useAdvancedMarkers) {
+      mapOptions.mapId = import.meta.env.VITE_GOOGLE_MAP_ID || 'DEMO_MAP_ID'
+    }
+    const map = new window.google.maps.Map(mapRef.current, mapOptions)
 
-    // Add center marker (business location)
-    new window.google.maps.Marker({
-      position: { lat: Number(selectedGrid.center_lat), lng: Number(selectedGrid.center_lng) },
-      map: map,
-      icon: {
-        url: 'data:image/svg+xml,' + encodeURIComponent(`
-          <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
-            <circle cx="20" cy="20" r="18" fill="#4bbf39" stroke="white" stroke-width="3"/>
-            <circle cx="20" cy="20" r="8" fill="white"/>
-          </svg>
-        `),
-        scaledSize: new window.google.maps.Size(40, 40),
-        anchor: new window.google.maps.Point(20, 20)
-      },
-      title: 'Business Location',
-      zIndex: 1000
-    })
+    // Get brand primary color from CSS
+    const brandPrimary = getComputedStyle(document.documentElement)
+      .getPropertyValue('--brand-primary').trim() || '#4bbf39'
+    const centerPos = { lat: Number(selectedGrid.center_lat), lng: Number(selectedGrid.center_lng) }
+
+    // Add center marker (business location): AdvancedMarkerElement or legacy Marker
+    if (useAdvancedMarkers) {
+      const centerPinEl = document.createElement('div')
+      centerPinEl.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+          <circle cx="20" cy="20" r="18" fill="${brandPrimary}" stroke="white" stroke-width="3" opacity="0.9"/>
+          <circle cx="20" cy="20" r="8" fill="white"/>
+        </svg>
+      `
+      centerPinEl.style.cursor = 'pointer'
+      const centerMarker = new window.google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: centerPos,
+        content: centerPinEl,
+        title: 'Business Location',
+        zIndex: 1000
+      })
+      overlaysRef.current.push(centerMarker)
+    } else {
+      overlaysRef.current.push(new window.google.maps.Marker({
+        position: centerPos,
+        map,
+        icon: {
+          url: 'data:image/svg+xml,' + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+              <circle cx="20" cy="20" r="18" fill="${brandPrimary}" stroke="white" stroke-width="3" opacity="0.9"/>
+              <circle cx="20" cy="20" r="8" fill="white"/>
+            </svg>
+          `),
+          scaledSize: new window.google.maps.Size(40, 40),
+          anchor: new window.google.maps.Point(20, 20)
+        },
+        title: 'Business Location',
+        zIndex: 1000
+      }))
+    }
 
     mapInstanceRef.current = map
   }
 
   const renderGridOverlay = () => {
-    // Clear existing overlays
-    overlaysRef.current.forEach(overlay => overlay.setMap(null))
+    // Clear existing overlays (Marker uses setMap; AdvancedMarkerElement uses .map = null)
+    overlaysRef.current.forEach(overlay => {
+      if (typeof overlay.setMap === 'function') overlay.setMap(null)
+      else if (overlay.map !== undefined) overlay.map = null
+    })
     overlaysRef.current = []
 
     if (!mapInstanceRef.current || !selectedGrid) return
@@ -189,7 +300,7 @@ export default function LocalSeoHeatMap({ projectId }) {
 
     // Create data lookup map
     const dataMap = new Map()
-    heatMapData.forEach(point => {
+    heatMapList.forEach(point => {
       dataMap.set(`${point.row_index}-${point.col_index}`, point)
     })
 
@@ -197,7 +308,7 @@ export default function LocalSeoHeatMap({ projectId }) {
     for (let row = 0; row < gridSize; row++) {
       for (let col = 0; col < gridSize; col++) {
         const cellData = dataMap.get(`${row}-${col}`)
-        const position = cellData?.ranking_position
+        const position = cellData?.ranking_position ?? cellData?.position
         const color = getRankingColor(position)
         const opacity = getCellOpacity(cellData?.crawled_at)
 
@@ -212,7 +323,7 @@ export default function LocalSeoHeatMap({ projectId }) {
 
         const rectangle = new window.google.maps.Rectangle({
           bounds: bounds,
-          strokeColor: '#ffffff',
+          strokeColor: 'rgba(255, 255, 255, 0.8)',
           strokeOpacity: 0.8,
           strokeWeight: 1,
           fillColor: color,
@@ -232,38 +343,58 @@ export default function LocalSeoHeatMap({ projectId }) {
           })
         })
 
-        // Add hover effect
+        // Add hover effect with brand color
+        const brandPrimary = getComputedStyle(document.documentElement)
+          .getPropertyValue('--brand-primary').trim() || '#4bbf39'
+        
         rectangle.addListener('mouseover', () => {
           rectangle.setOptions({ 
             strokeWeight: 3,
-            strokeColor: '#4bbf39'
+            strokeColor: brandPrimary
           })
         })
         rectangle.addListener('mouseout', () => {
           rectangle.setOptions({ 
             strokeWeight: 1,
-            strokeColor: '#ffffff'
+            strokeColor: 'rgba(255, 255, 255, 0.8)'
           })
         })
 
-        // Add rank label in center of cell
+        // Add rank label in center of cell: AdvancedMarkerElement or legacy Marker
         if (position) {
-          const label = new window.google.maps.Marker({
-            position: { lat: cellLat, lng: cellLng },
-            map: mapInstanceRef.current,
-            icon: {
-              url: 'data:image/svg+xml,' + encodeURIComponent(`
-                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
-                  <circle cx="15" cy="15" r="12" fill="white" stroke="${color}" stroke-width="2"/>
-                  <text x="15" y="20" text-anchor="middle" font-size="12" font-weight="bold" fill="${color}">${position}</text>
-                </svg>
-              `),
-              scaledSize: new window.google.maps.Size(30, 30),
-              anchor: new window.google.maps.Point(15, 15)
-            },
-            zIndex: position ? (100 - position) : 0
-          })
-          overlaysRef.current.push(label)
+          if (window.google.maps.marker?.AdvancedMarkerElement) {
+            const labelEl = document.createElement('div')
+            labelEl.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+                <circle cx="15" cy="15" r="12" fill="white" stroke="${color}" stroke-width="2"/>
+                <text x="15" y="20" text-anchor="middle" font-size="12" font-weight="bold" fill="${color}">${position}</text>
+              </svg>
+            `
+            const label = new window.google.maps.marker.AdvancedMarkerElement({
+              map: mapInstanceRef.current,
+              position: { lat: cellLat, lng: cellLng },
+              content: labelEl,
+              zIndex: position ? (100 - position) : 0
+            })
+            overlaysRef.current.push(label)
+          } else {
+            const label = new window.google.maps.Marker({
+              position: { lat: cellLat, lng: cellLng },
+              map: mapInstanceRef.current,
+              icon: {
+                url: 'data:image/svg+xml,' + encodeURIComponent(`
+                  <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+                    <circle cx="15" cy="15" r="12" fill="white" stroke="${color}" stroke-width="2"/>
+                    <text x="15" y="20" text-anchor="middle" font-size="12" font-weight="bold" fill="${color}">${position}</text>
+                  </svg>
+                `),
+                scaledSize: new window.google.maps.Size(30, 30),
+                anchor: new window.google.maps.Point(15, 15)
+              },
+              zIndex: position ? (100 - position) : 0
+            })
+            overlaysRef.current.push(label)
+          }
         }
 
         overlaysRef.current.push(rectangle)
@@ -275,38 +406,65 @@ export default function LocalSeoHeatMap({ projectId }) {
     if (!selectedGrid?.id || !selectedKeyword) return
     setIsLoading(true)
     try {
-      const data = await fetchHeatMapData(selectedGrid.id, selectedKeyword)
-      setHeatMapData(data || [])
+      const res = await seoApi.getHeatMapData(selectedGrid.id, { keyword: selectedKeyword })
+      // Axios res = { data: body }; API body = { data: [...], summary }
+      const list = Array.isArray(res?.data?.data) ? res.data.data : Array.isArray(res?.data) ? res.data : []
+      setHeatMapData(list)
     } catch (error) {
       console.error('Failed to load heat map data:', error)
+      setHeatMapData([])
     }
     setIsLoading(false)
   }
 
-  // Calculate stats from heat map data
-  const stats = {
-    avgRank: heatMapData.length > 0 
-      ? (heatMapData.filter(d => d.ranking_position).reduce((sum, d) => sum + d.ranking_position, 0) / 
-         heatMapData.filter(d => d.ranking_position).length).toFixed(1)
-      : '-',
-    top3Count: heatMapData.filter(d => d.ranking_position && d.ranking_position <= 3).length,
-    localPackCount: heatMapData.filter(d => d.ranking_type === 'local_pack').length,
-    notFoundCount: heatMapData.filter(d => !d.ranking_position).length,
-    totalCells: (selectedGrid?.grid_size || 7) ** 2
+  // Crawl rankings for the current grid
+  const crawlGrid = async () => {
+    if (!selectedGrid?.id) return
+    
+    setIsCrawling(true)
+    setCrawlStatus(null)
+    
+    try {
+      // Use the grid name as business name (or could get from GBP connection)
+      const businessName = selectedGrid.name || 'Business'
+      const res = await seoApi.crawlLocalGrid(selectedGrid.id, businessName, {
+        keywords: selectedGrid.keywords,
+        delay: 1500 // 1.5 seconds between requests for rate limiting
+      })
+      
+      const result = res?.data || res
+      setCrawlStatus({
+        success: result.success,
+        cellsCrawled: result.cellsCrawled,
+        rankingsFound: result.rankingsFound,
+        errors: result.errors?.length || 0
+      })
+      
+      // Refresh heat map data after crawl completes
+      if (selectedKeyword) {
+        await loadHeatMapData()
+      }
+    } catch (error) {
+      console.error('Failed to crawl grid:', error)
+      setCrawlStatus({
+        success: false,
+        error: error.message
+      })
+    }
+    
+    setIsCrawling(false)
   }
 
-  if (!import.meta.env.GOOGLE_CLOUD_API_KEY) {
-    return (
-      <Card className="bg-[var(--glass-bg)] border-[var(--glass-border)]">
-        <CardContent className="py-12 text-center">
-          <AlertCircle className="h-12 w-12 text-[var(--accent-orange)] mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">Google Maps API Key Required</h3>
-          <p className="text-[var(--text-secondary)] mb-4">
-            Add GOOGLE_CLOUD_API_KEY to your environment to enable heat maps.
-          </p>
-        </CardContent>
-      </Card>
-    )
+  // Calculate stats from heat map data (rank and heatMapList defined earlier in component)
+  const stats = {
+    avgRank: heatMapList.length > 0
+      ? (heatMapList.filter(d => rank(d)).reduce((sum, d) => sum + rank(d), 0) /
+         heatMapList.filter(d => rank(d)).length).toFixed(1)
+      : '-',
+    top3Count: heatMapList.filter(d => rank(d) && rank(d) <= 3).length,
+    localPackCount: heatMapList.filter(d => (d?.ranking_type ?? d?.type) === 'local_pack').length,
+    notFoundCount: heatMapList.filter(d => !rank(d)).length,
+    totalCells: (selectedGrid?.grid_size || 7) ** 2
   }
 
   return (
@@ -366,20 +524,124 @@ export default function LocalSeoHeatMap({ projectId }) {
         </Button>
 
         <Button 
-          onClick={loadHeatMapData}
-          disabled={isLoading}
+          onClick={crawlGrid}
+          disabled={isCrawling || !selectedGrid}
           size="sm"
-          className="bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)]"
+          className="bg-[var(--accent-green)] hover:opacity-90"
+          title="Crawl Google Maps for current rankings at each grid point"
+        >
+          {isCrawling ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Play className="h-4 w-4 mr-2" />
+          )}
+          {isCrawling ? 'Crawling...' : 'Crawl Rankings'}
+        </Button>
+
+        <Button 
+          onClick={loadHeatMapData}
+          disabled={isLoading || !selectedGrid}
+          size="sm"
+          variant="outline"
+          className="border-[var(--glass-border)]"
         >
           <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
 
-        <Button variant="outline" size="sm" className="border-[var(--glass-border)]">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="border-[var(--glass-border)]"
+          onClick={() => setShowNewGridDialog(true)}
+        >
           <Plus className="h-4 w-4 mr-2" />
           New Grid
         </Button>
       </div>
+
+      {/* Crawl Status Alert */}
+      {crawlStatus && (
+        <div className={`p-3 rounded-lg flex items-center gap-3 ${
+          crawlStatus.success 
+            ? 'bg-green-500/10 border border-green-500/30' 
+            : 'bg-red-500/10 border border-red-500/30'
+        }`}>
+          {crawlStatus.success ? (
+            <CheckCircle className="h-5 w-5 text-green-500" />
+          ) : (
+            <AlertCircle className="h-5 w-5 text-red-500" />
+          )}
+          <span className="text-sm">
+            {crawlStatus.success 
+              ? `Crawl complete: ${crawlStatus.cellsCrawled} cells crawled, ${crawlStatus.rankingsFound} rankings found`
+              : `Crawl failed: ${crawlStatus.error || 'Unknown error'}`
+            }
+          </span>
+          <button 
+            onClick={() => setCrawlStatus(null)} 
+            className="ml-auto text-sm opacity-60 hover:opacity-100"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Settings Panel (collapsible) */}
+      {showSettings && (
+        <Card className="bg-[var(--glass-bg)] border-[var(--glass-border)]">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Settings2 className="h-5 w-5" />
+              Grid Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="text-sm font-medium text-[var(--text-secondary)] mb-2 block">Grid Size</label>
+                <p className="text-[var(--text-primary)]">{selectedGrid?.grid_size || 7} x {selectedGrid?.grid_size || 7}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[var(--text-secondary)] mb-2 block">Radius</label>
+                <p className="text-[var(--text-primary)]">{selectedGrid?.radius_miles || 10} miles</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[var(--text-secondary)] mb-2 block">Keywords</label>
+                <p className="text-[var(--text-primary)]">{selectedGrid?.keywords?.length || 0} tracked</p>
+              </div>
+            </div>
+            <p className="text-sm text-[var(--text-tertiary)]">
+              To modify grid settings, create a new grid with your desired configuration.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* New Grid Dialog (simple placeholder - would be a proper Dialog in production) */}
+      {showNewGridDialog && (
+        <Card className="bg-[var(--glass-bg)] border-[var(--brand-primary)] border-2">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center justify-between">
+              Create New Grid
+              <Button variant="ghost" size="sm" onClick={() => setShowNewGridDialog(false)}>×</Button>
+            </CardTitle>
+            <CardDescription>Set up a new ranking grid for your location</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-[var(--text-secondary)]">
+              New grid creation coming soon. For now, grids are created when connecting your Google Business Profile.
+            </p>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowNewGridDialog(false)}
+              className="w-full"
+            >
+              Close
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Overview */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -417,13 +679,13 @@ export default function LocalSeoHeatMap({ projectId }) {
 
       {/* Main Map Container */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Map */}
+        {/* Map - fixed square aspect ratio, no interaction */}
         <div className="lg:col-span-3">
           <Card className="bg-[var(--glass-bg)] border-[var(--glass-border)] overflow-hidden">
             <div 
               ref={mapRef} 
-              className="w-full h-[600px]"
-              style={{ minHeight: '600px' }}
+              className="w-full aspect-square"
+              style={{ maxHeight: '700px' }}
             />
             {!googleMapsLoaded && (
               <div className="absolute inset-0 flex items-center justify-center bg-[var(--surface-page)]">
@@ -435,27 +697,27 @@ export default function LocalSeoHeatMap({ projectId }) {
           {/* Legend */}
           <div className="mt-4 flex items-center justify-center gap-6">
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#4bbf39' }} />
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--brand-primary)' }} />
               <span className="text-sm text-[var(--text-secondary)]">#1</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#8bd377' }} />
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--brand-secondary)' }} />
               <span className="text-sm text-[var(--text-secondary)]">2-3</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#fbbf24' }} />
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--accent-yellow)' }} />
               <span className="text-sm text-[var(--text-secondary)]">4-5</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#f97316' }} />
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--accent-orange)' }} />
               <span className="text-sm text-[var(--text-secondary)]">6-10</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444' }} />
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--accent-red)' }} />
               <span className="text-sm text-[var(--text-secondary)]">11-15</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#9ca3af' }} />
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--text-tertiary)' }} />
               <span className="text-sm text-[var(--text-secondary)]">Not Found</span>
             </div>
           </div>
