@@ -139,3 +139,30 @@ Comments updated: `messages/shared.jsx`, `lib/hooks/use-messages.js`.
 |--------|--------|
 | Remove useLegacyEchoStream implementation from `lib/hooks/use-messages.js` | **Done** |
 | Delete root `components/proposal-blocks/` (22 files) | **Done** |
+
+---
+
+## 10. Continued audit (fourth pass)
+
+### 10.1 Dead implementations in use-reports.js
+
+Barrel already stopped exporting `useProjectReport` and `useLighthouseReport` (Section 8.1). No component imports them (or imports from `@/lib/hooks/use-reports` for these; BillingModule only imports `useFinancialReport` from that file).
+
+| Item | Finding | Action |
+|------|---------|--------|
+| **useProjectReport** | Never imported. | **Done:** Removed function from `lib/hooks/use-reports.js`. |
+| **useLighthouseReport** | Never imported. | **Done:** Removed function from `lib/hooks/use-reports.js`. |
+
+`reportsKeys.project` and `reportsKeys.lighthouse` remain in the file (used by invalidation in `useRunAudit` for lighthouse; project key kept for consistency).
+
+### 10.2 Summary of fourth-pass actions
+
+| Action | Status |
+|--------|--------|
+| Remove useProjectReport from `lib/hooks/use-reports.js` | **Done** |
+| Remove useLighthouseReport from `lib/hooks/use-reports.js` | **Done** |
+
+### 10.3 Optional follow-ups (no change this pass)
+
+- **use-contacts.js:** Still no imports (barrel re-export removed in Section 8.1). File remains for potential future “Contacts” or “Directory” UI. To remove: delete `src/lib/hooks/use-contacts.js` and any references.
+- **Reputation campaign/template hooks:** Implementations remain in `use-reputation.js`; barrel no longer exports them. Remove from source file if no campaigns/templates UI is planned.

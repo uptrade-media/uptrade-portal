@@ -204,7 +204,7 @@ export default function SignalPulse({ projectId, onNavigate }) {
     knowledgeStats,
     faqsStats,
     knowledgeGapsStats,
-    fetchKnowledge,
+    fetchKnowledgeStats,
     fetchFaqs,
     fetchKnowledgeGapsStats,
     fetchActivityFeed,
@@ -221,8 +221,8 @@ export default function SignalPulse({ projectId, onNavigate }) {
     try {
       setLoading(true)
       
-      const [, , , activityData, domainsData] = await Promise.all([
-        fetchKnowledge(projectId, { limit: 1 }),
+      const [statsData, , gapsStats, activityData, domainsData] = await Promise.all([
+        fetchKnowledgeStats(projectId),
         fetchFaqs(projectId, { limit: 1 }),
         fetchKnowledgeGapsStats(projectId),
         fetchActivityFeed(projectId, 10),
@@ -249,7 +249,8 @@ export default function SignalPulse({ projectId, onNavigate }) {
         ])
       }
       
-      setTimeout(() => calculateHealthScore(), 100)
+      // Calculate health score with actual data
+      calculateHealthScore(statsData, gapsStats)
       
     } catch (error) {
       console.error('Failed to load Signal stats:', error)
@@ -264,14 +265,17 @@ export default function SignalPulse({ projectId, onNavigate }) {
     setRefreshing(false)
   }
   
-  const calculateHealthScore = () => {
-    const chunks = knowledgeStats?.totalChunks || 0
+  const calculateHealthScore = (statsData, gapsStats) => {
+    const chunks = statsData?.totalChunks || knowledgeStats?.totalChunks || 0
     const faqs = faqsStats?.total || 0
-    const gaps = knowledgeGapsStats?.total || 0
+    const gaps = gapsStats?.openGaps || knowledgeGapsStats?.openGaps || 0
     
     let score = 0
-    score += Math.min(40, chunks * 2)
-    score += Math.min(30, faqs * 3)
+    // Knowledge chunks contribute up to 60 points (max out at 30 chunks)
+    score += Math.min(60, Math.round((chunks / 30) * 60))
+    // FAQs contribute up to 20 points
+    score += Math.min(20, faqs * 2)
+    // Gaps reduce score (up to 20 points penalty)
     score -= Math.min(20, gaps * 2)
     score = Math.max(0, Math.min(100, score))
     
@@ -321,13 +325,70 @@ export default function SignalPulse({ projectId, onNavigate }) {
             <StatTile
               icon={AlertTriangle}
               label="Knowledge Gaps"
-              value={loading ? '—' : (knowledgeGapsStats?.total || 0)}
+              value={loading ? '—' : (knowledgeGapsStats?.openGaps || 0)}
               sublabel="Unanswered questions"
-              highlight={(knowledgeGapsStats?.total || 0) > 5}
+              highlight={(knowledgeGapsStats?.openGaps || 0) > 5}
               onClick={() => onNavigate('insights')}
             />
           </div>
         </div>
+        
+        {/* Knowledge Opportunities - Show when there are gaps or low coverage */}
+        {!loading && ((knowledgeGapsStats?.openGaps || 0) > 0 || domains.some(d => d.coverage < 40)) && (
+          <GlowCard glow className="border-amber-500/20">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/10 border border-amber-500/20">
+                  <AlertTriangle className="h-5 w-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-[var(--text-primary)]">Knowledge Opportunities</h3>
+                  <p className="text-xs text-[var(--text-muted)]">Fill these gaps to improve Signal's intelligence</p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Knowledge gaps opportunity */}
+                {(knowledgeGapsStats?.openGaps || 0) > 0 && (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => onNavigate('insights')}
+                    className="p-4 rounded-xl text-left bg-gradient-to-br from-amber-500/5 to-transparent border border-amber-500/20 hover:border-amber-500/40 transition-all"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <span className="text-2xl font-bold text-amber-400">{knowledgeGapsStats?.openGaps || 0}</span>
+                      <Sparkles className="h-4 w-4 text-amber-400/50" />
+                    </div>
+                    <p className="text-sm font-medium text-[var(--text-primary)]">Unanswered Questions</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">Teach Signal to answer these</p>
+                  </motion.button>
+                )}
+                
+                {/* Low coverage domains */}
+                {domains.filter(d => d.coverage < 40).slice(0, 2).map((domain) => {
+                  const Icon = DOMAIN_ICONS[domain.key] || Building2
+                  return (
+                    <motion.button
+                      key={domain.key}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => onNavigate('mind')}
+                      className="p-4 rounded-xl text-left bg-gradient-to-br from-orange-500/5 to-transparent border border-orange-500/20 hover:border-orange-500/40 transition-all"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <Icon className="h-5 w-5 text-orange-400" />
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400">{domain.coverage}%</span>
+                      </div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{domain.label}</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">Add more knowledge about this</p>
+                    </motion.button>
+                  )
+                })}
+              </div>
+            </div>
+          </GlowCard>
+        )}
         
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

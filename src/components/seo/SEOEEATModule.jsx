@@ -59,8 +59,11 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signalSeoApi } from '@/lib/signal-api'
+import { blogApi } from '@/lib/portal-api'
 import { useSignalAccess } from '@/lib/signal-access'
 import SignalIcon from '@/components/ui/SignalIcon'
+import { Label } from '@/components/ui/label'
+import { toast } from 'sonner'
 
 // E-E-A-T Score visualization
 function EEATScoreRing({ score, label, color = 'brand-primary', size = 'default' }) {
@@ -387,6 +390,130 @@ export default function SEOEEATModule({ projectId }) {
   const [activeTab, setActiveTab] = useState('overview')
   const [isGeneratingCitations, setIsGeneratingCitations] = useState(false)
   
+  // Author dialog state
+  const [isAuthorDialogOpen, setIsAuthorDialogOpen] = useState(false)
+  const [editingAuthor, setEditingAuthor] = useState(null)
+  const [isSavingAuthor, setIsSavingAuthor] = useState(false)
+  const [authorForm, setAuthorForm] = useState({
+    name: '',
+    title: '',
+    company: '',
+    bio: '',
+    short_bio: '',
+    email: '',
+    avatar_url: '',
+    linkedin_url: '',
+    twitter_url: '',
+    website_url: '',
+    expertise_areas: [],
+    credentials: [],
+    years_experience: '',
+    is_default: false,
+  })
+  
+  // Open author dialog for creating/editing
+  const openAuthorDialog = (author = null) => {
+    if (author) {
+      setEditingAuthor(author)
+      setAuthorForm({
+        name: author.name || '',
+        title: author.title || '',
+        company: author.company || '',
+        bio: author.bio || '',
+        short_bio: author.short_bio || '',
+        email: author.email || '',
+        avatar_url: author.avatar_url || '',
+        linkedin_url: author.linkedin_url || '',
+        twitter_url: author.twitter_url || '',
+        website_url: author.website_url || '',
+        expertise_areas: author.expertise_areas || author.expertise || [],
+        credentials: author.credentials || [],
+        years_experience: author.years_experience?.toString() || '',
+        is_default: author.is_default || false,
+      })
+    } else {
+      setEditingAuthor(null)
+      setAuthorForm({
+        name: '',
+        title: '',
+        company: '',
+        bio: '',
+        short_bio: '',
+        email: '',
+        avatar_url: '',
+        linkedin_url: '',
+        twitter_url: '',
+        website_url: '',
+        expertise_areas: [],
+        credentials: [],
+        years_experience: '',
+        is_default: false,
+      })
+    }
+    setIsAuthorDialogOpen(true)
+  }
+  
+  // Save author (create or update)
+  const handleSaveAuthor = async () => {
+    if (!authorForm.name.trim()) {
+      toast.error('Author name is required')
+      return
+    }
+    
+    setIsSavingAuthor(true)
+    try {
+      const authorData = {
+        name: authorForm.name.trim(),
+        title: authorForm.title.trim() || undefined,
+        company: authorForm.company.trim() || undefined,
+        bio: authorForm.bio.trim() || undefined,
+        short_bio: authorForm.short_bio.trim() || undefined,
+        email: authorForm.email.trim() || undefined,
+        avatar_url: authorForm.avatar_url.trim() || undefined,
+        linkedin_url: authorForm.linkedin_url.trim() || undefined,
+        twitter_url: authorForm.twitter_url.trim() || undefined,
+        website_url: authorForm.website_url.trim() || undefined,
+        expertise_areas: authorForm.expertise_areas.length > 0 ? authorForm.expertise_areas : undefined,
+        credentials: authorForm.credentials.length > 0 ? authorForm.credentials : undefined,
+        years_experience: authorForm.years_experience ? parseInt(authorForm.years_experience, 10) : undefined,
+        is_default: authorForm.is_default,
+      }
+      
+      if (editingAuthor?.id) {
+        // Update existing author
+        await blogApi.updateAuthor(editingAuthor.id, authorData)
+        toast.success('Author updated successfully')
+      } else {
+        // Create new author
+        await blogApi.createAuthor(projectId, authorData)
+        toast.success('Author created successfully')
+      }
+      
+      // Refresh authors list
+      const authorsData = await blogApi.listAuthors(projectId)
+      setAuthors(authorsData?.authors || [])
+      
+      setIsAuthorDialogOpen(false)
+    } catch (error) {
+      console.error('Failed to save author:', error)
+      toast.error(error.message || 'Failed to save author')
+    } finally {
+      setIsSavingAuthor(false)
+    }
+  }
+  
+  // Handle expertise areas input (comma separated)
+  const handleExpertiseChange = (value) => {
+    const areas = value.split(',').map(s => s.trim()).filter(Boolean)
+    setAuthorForm(prev => ({ ...prev, expertise_areas: areas }))
+  }
+  
+  // Handle credentials input (comma separated)
+  const handleCredentialsChange = (value) => {
+    const creds = value.split(',').map(s => s.trim()).filter(Boolean)
+    setAuthorForm(prev => ({ ...prev, credentials: creds }))
+  }
+  
   // Fetch E-E-A-T data
   useEffect(() => {
     const loadData = async () => {
@@ -608,7 +735,7 @@ export default function SEOEEATModule({ projectId }) {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Content Authors</CardTitle>
-                  <Button variant="outline" size="sm" className="text-xs">
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => openAuthorDialog()}>
                     <Plus className="h-3 w-3 mr-1" />
                     Add Author
                   </Button>
@@ -617,7 +744,7 @@ export default function SEOEEATModule({ projectId }) {
               <CardContent>
                 <div className="space-y-3">
                   {authors.slice(0, 2).map(author => (
-                    <AuthorCard key={author.id} author={author} />
+                    <AuthorCard key={author.id} author={author} onEdit={openAuthorDialog} />
                   ))}
                 </div>
                 {authors.length > 2 && (
@@ -673,14 +800,14 @@ export default function SEOEEATModule({ projectId }) {
             <h3 className="text-lg font-semibold text-[var(--text-primary)]">
               Content Authors ({authors.length})
             </h3>
-            <Button className="bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)]">
+            <Button className="bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)]" onClick={() => openAuthorDialog()}>
               <Plus className="h-4 w-4 mr-2" />
               Add Author
             </Button>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {authors.map(author => (
-              <AuthorCard key={author.id} author={author} />
+              <AuthorCard key={author.id} author={author} onEdit={openAuthorDialog} />
             ))}
           </div>
         </TabsContent>
@@ -726,6 +853,200 @@ export default function SEOEEATModule({ projectId }) {
           </div>
         </TabsContent>
       </Tabs>
+      
+      {/* Author Create/Edit Dialog */}
+      <Dialog open={isAuthorDialogOpen} onOpenChange={setIsAuthorDialogOpen}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingAuthor ? 'Edit Author' : 'Add New Author'}
+            </DialogTitle>
+            <DialogDescription>
+              {editingAuthor 
+                ? 'Update author information for E-E-A-T compliance.' 
+                : 'Create a new author profile for blog content attribution.'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-4 py-4">
+            {/* Basic Info */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Name *</Label>
+                <Input
+                  id="name"
+                  value={authorForm.name}
+                  onChange={(e) => setAuthorForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="John Smith"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="title">Professional Title</Label>
+                <Input
+                  id="title"
+                  value={authorForm.title}
+                  onChange={(e) => setAuthorForm(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="Senior SEO Strategist"
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="company">Company</Label>
+                <Input
+                  id="company"
+                  value={authorForm.company}
+                  onChange={(e) => setAuthorForm(prev => ({ ...prev, company: e.target.value }))}
+                  placeholder="Uptrade Media"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={authorForm.email}
+                  onChange={(e) => setAuthorForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="john@example.com"
+                />
+              </div>
+            </div>
+            
+            {/* Avatar */}
+            <div className="space-y-2">
+              <Label htmlFor="avatar_url">Avatar URL</Label>
+              <Input
+                id="avatar_url"
+                value={authorForm.avatar_url}
+                onChange={(e) => setAuthorForm(prev => ({ ...prev, avatar_url: e.target.value }))}
+                placeholder="https://example.com/avatar.jpg"
+              />
+            </div>
+            
+            {/* Bio */}
+            <div className="space-y-2">
+              <Label htmlFor="bio">Full Bio</Label>
+              <Textarea
+                id="bio"
+                value={authorForm.bio}
+                onChange={(e) => setAuthorForm(prev => ({ ...prev, bio: e.target.value }))}
+                placeholder="Detailed biography for author pages..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="short_bio">Short Bio (for bylines)</Label>
+              <Input
+                id="short_bio"
+                value={authorForm.short_bio}
+                onChange={(e) => setAuthorForm(prev => ({ ...prev, short_bio: e.target.value }))}
+                placeholder="1-2 sentence bio"
+              />
+            </div>
+            
+            {/* Expertise */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="expertise">Expertise Areas (comma-separated)</Label>
+                <Input
+                  id="expertise"
+                  value={authorForm.expertise_areas.join(', ')}
+                  onChange={(e) => handleExpertiseChange(e.target.value)}
+                  placeholder="SEO, Content Marketing, Local Business"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="credentials">Credentials (comma-separated)</Label>
+                <Input
+                  id="credentials"
+                  value={authorForm.credentials.join(', ')}
+                  onChange={(e) => handleCredentialsChange(e.target.value)}
+                  placeholder="MBA, Certified SEO Professional"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="years_experience">Years of Experience</Label>
+              <Input
+                id="years_experience"
+                type="number"
+                value={authorForm.years_experience}
+                onChange={(e) => setAuthorForm(prev => ({ ...prev, years_experience: e.target.value }))}
+                placeholder="10"
+              />
+            </div>
+            
+            {/* Social Links */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="linkedin_url">LinkedIn URL</Label>
+                <Input
+                  id="linkedin_url"
+                  value={authorForm.linkedin_url}
+                  onChange={(e) => setAuthorForm(prev => ({ ...prev, linkedin_url: e.target.value }))}
+                  placeholder="https://linkedin.com/in/..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="twitter_url">Twitter/X URL</Label>
+                <Input
+                  id="twitter_url"
+                  value={authorForm.twitter_url}
+                  onChange={(e) => setAuthorForm(prev => ({ ...prev, twitter_url: e.target.value }))}
+                  placeholder="https://x.com/..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="website_url">Website URL</Label>
+                <Input
+                  id="website_url"
+                  value={authorForm.website_url}
+                  onChange={(e) => setAuthorForm(prev => ({ ...prev, website_url: e.target.value }))}
+                  placeholder="https://..."
+                />
+              </div>
+            </div>
+            
+            {/* Default author toggle */}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="is_default"
+                checked={authorForm.is_default}
+                onChange={(e) => setAuthorForm(prev => ({ ...prev, is_default: e.target.checked }))}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <Label htmlFor="is_default">Set as default author for this project</Label>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAuthorDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSaveAuthor}
+              disabled={isSavingAuthor}
+              className="bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)]"
+            >
+              {isSavingAuthor ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  {editingAuthor ? 'Update Author' : 'Create Author'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

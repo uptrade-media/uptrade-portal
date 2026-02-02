@@ -1569,8 +1569,8 @@ export default function BlogDashboard() {
           subtitle={hasSignalAccess ? 'Content & SEO with Signal' : 'Content & SEO'}
           actions={headerActions}
         />
-        <ModuleLayout.Content>
-          <div className="px-4 py-3 border-b border-[var(--glass-border)] bg-muted/5 mb-4 -mx-4 -mt-4">
+        <ModuleLayout.Content noPadding={false}>
+          <div className="px-4 py-3 border-b border-[var(--glass-border)] bg-muted/5 mb-6 -mx-4 -mt-4">
             <div className="flex items-center gap-6 text-sm">
               <span className="text-[var(--text-secondary)]">
                 <strong className="text-[var(--text-primary)]">{postCounts.all}</strong> total posts

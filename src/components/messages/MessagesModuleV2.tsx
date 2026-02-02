@@ -55,6 +55,7 @@ import useAuthStore from '@/lib/auth-store'
 import { useBrandColors } from '@/hooks/useBrandColors'
 import { messagesApi, chatkitApi, engageApi, portalApi } from '@/lib/portal-api'
 import { toast } from '@/lib/toast'
+import { usePendingHandoffs } from '@/lib/MessagesProvider'
 import { QuickSwitcher } from './QuickSwitcher'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -489,7 +490,16 @@ export function MessagesModuleV2({
   const brandColors = useBrandColors()
   const user = useAuthStore(state => state.user)
   const project = useAuthStore(state => state.currentProject)
-  
+  /** Real-time pending handoffs from MessagesProvider (socket engage:session) */
+  const contextPendingHandoffs = usePendingHandoffs()
+  /** Merge queue (periodic API) with context (real-time socket) so handoffs show immediately */
+  const mergedPendingHandoffs = useMemo(() => {
+    const byId = new Map<string, any>()
+    ;(pendingHandoffs || []).forEach((s: any) => byId.set(s.id, s))
+    ;(contextPendingHandoffs || []).forEach((h: any) => byId.set(h.id, { ...byId.get(h.id), ...h }))
+    return Array.from(byId.values())
+  }, [pendingHandoffs, contextPendingHandoffs])
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Echo Chat (AI - SSE Streaming)
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1280,12 +1290,12 @@ export function MessagesModuleV2({
           )}
         </div>
         
-        {/* Pending handoffs banner (Live tab) */}
-        {activeTab === 'visitor' && pendingHandoffs.length > 0 && (
+        {/* Pending handoffs banner (Live tab) — merged queue + real-time socket */}
+        {activeTab === 'visitor' && mergedPendingHandoffs.length > 0 && (
           <button
             type="button"
             onClick={() => {
-              const first = pendingHandoffs[0]
+              const first = mergedPendingHandoffs[0]
               if (first?.id) {
                 setSelectedPortalThreadId(first.id)
                 updateUrl('visitor', null, first.id)
@@ -1294,7 +1304,7 @@ export function MessagesModuleV2({
             className="mx-3 mb-2 w-[calc(100%-24px)] p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-left hover:bg-amber-500/15 transition-colors"
           >
             <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
-              {pendingHandoffs.length} waiting for agent — click to open first
+              {mergedPendingHandoffs.length} waiting for agent — click to open first
             </p>
           </button>
         )}

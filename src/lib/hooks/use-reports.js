@@ -96,26 +96,6 @@ export function useOverviewReport(period = 30, options = {}) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PROJECT REPORT
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Fetch project-specific report
- */
-export function useProjectReport(projectId, period = 30, options = {}) {
-  return useQuery({
-    queryKey: reportsKeys.project(projectId, period),
-    queryFn: async () => {
-      const response = await reportsApi.project(projectId, { period })
-      return response.data || response
-    },
-    enabled: !!projectId,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    ...options,
-  })
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // FINANCIAL REPORT
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -154,24 +134,8 @@ export function useActivityReport(period = 30, options = {}) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// LIGHTHOUSE / AUDITS
+// AUDITS
 // ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Fetch latest lighthouse report
- */
-export function useLighthouseReport(projectId, options = {}) {
-  return useQuery({
-    queryKey: reportsKeys.lighthouse(projectId),
-    queryFn: async () => {
-      const response = await reportsApi.lighthouse(projectId)
-      return response.data?.report || response.data
-    },
-    enabled: !!projectId,
-    staleTime: 1000 * 60 * 15, // 15 minutes
-    ...options,
-  })
-}
 
 /**
  * Fetch all audits for a project

@@ -375,27 +375,49 @@ export default function EchoBlogCreator({
 
     try {
       let result
-      // Always use E-E-A-T when we have a project (SEO-driven blog creation)
+      // Use new phased pipeline when we have a project (SEO-driven blog creation with E-E-A-T)
       if (projectId && topic && targetKeyword) {
-        const eeatResult = await signalSeoApi.generateBlogWithEEAT(projectId, {
+        const pipelineResult = await signalSeoApi.generateBlogPipeline(projectId, {
           topic,
-          targetKeyword,
-          includeFAQ: includeFAQs,
-          citationLevel: 'standard',
+          target_keyword: targetKeyword,
+          content_type: 'how_to_guide',
+          include_faq: includeFAQs,
+          citation_level: 'standard',
         })
+        
+        // Map pipeline result to expected format
+        const post = pipelineResult.post || pipelineResult
+        
+        // Extract FAQ items from schemas if available
+        const faqSchema = post.schemas?.find(s => s.type === 'FAQPage')
+        const faqItems = faqSchema?.data?.mainEntity?.map(item => ({
+          question: item.name,
+          answer: item.acceptedAnswer?.text,
+        })) || []
+        
         result = {
-          title: eeatResult.title,
-          excerpt: eeatResult.metaDescription,
-          content: eeatResult.content,
-          contentHtml: eeatResult.contentHtml ?? eeatResult.content,
-          metadata: { metaDescription: eeatResult.metaDescription },
-          author: eeatResult.author,
-          citations: eeatResult.citations,
-          faqItems: eeatResult.faqItems,
-          schema: eeatResult.schema,
-          eatScore: eeatResult.eatScore,
-          seoScore: eeatResult.seoScore,
-          keywords: eeatResult.targetKeyword ? [eeatResult.targetKeyword] : [targetKeyword],
+          title: post.title,
+          excerpt: post.excerpt || post.meta_description,
+          content: post.content,
+          contentHtml: post.content,
+          metadata: { metaDescription: post.meta_description },
+          author: post.author,
+          citations: post.external_citations?.map(c => ({
+            claim: c.claim,
+            source: c.source,
+            url: c.url,
+          })) || [],
+          faqItems,
+          tableOfContents: post.table_of_contents,
+          internalLinks: post.internal_links,
+          schema: post.schemas,
+          eatScore: post.quality_scores?.eeat_score || 0,
+          seoScore: post.quality_scores?.seo_score || 0,
+          readabilityScore: post.quality_scores?.readability_score || 0,
+          keywordDensity: post.quality_scores?.keyword_density || post.keyword_density || 0,
+          keywords: [post.target_keyword, ...(post.secondary_keywords || [])].filter(Boolean),
+          wordCount: post.word_count,
+          readTime: post.estimated_read_time,
         }
       } else {
         result = await skillsApi.invoke('content', 'generate_blog', {
@@ -421,7 +443,8 @@ export default function EchoBlogCreator({
 
       simulateTyping(() => {
         const byline = result.author?.name ? ` By ${result.author.name}.` : ''
-        addBotMessage(`Your blog post is ready! 🎉\n\n**Title:** ${result.title}\n\n${result.excerpt || result.metadata?.metaDescription || ''}${byline}\n\nWould you like me to generate a featured image using AI, or would you prefer to upload your own?`)
+        const wordInfo = result.wordCount ? ` (${result.wordCount.toLocaleString()} words)` : ''
+        addBotMessage(`Your blog post is ready! 🎉\n\n**Title:** ${result.title}${wordInfo}\n\n${result.excerpt || result.metadata?.metaDescription || ''}${byline}\n\nWould you like me to generate a featured image using AI, or would you prefer to upload your own?`)
         setStage(STAGES.IMAGE)
       })
     } catch (error) {
@@ -654,9 +677,9 @@ export default function EchoBlogCreator({
     
     const message = input.trim()
     setInput('')
-    addUserMessage(message)
+    // TOPIC stage: handleTopicSelect adds the user message (avoids duplicate when pasting + Enter)
+    if (stage !== STAGES.TOPIC) addUserMessage(message)
     
-    // Handle based on current stage
     switch (stage) {
       case STAGES.TOPIC:
         handleTopicSelect(message)
@@ -714,7 +737,7 @@ export default function EchoBlogCreator({
   
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl h-[80vh] p-0 flex flex-col">
+      <DialogContent className="max-w-2xl h-[80vh] p-0 flex flex-col gap-0">
         {/* Header */}
         <DialogHeader className="p-4 border-b shrink-0">
           <DialogTitle className="flex items-center gap-2">
@@ -744,7 +767,8 @@ export default function EchoBlogCreator({
         </DialogHeader>
         
         {/* Messages Area */}
-        <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <div className="flex-1 overflow-hidden">
+          <ScrollArea className="h-full p-4" ref={scrollRef}>
           <div className="space-y-1">
             {messages.map((msg, i) => (
               <MessageBubble 
@@ -976,6 +1000,7 @@ export default function EchoBlogCreator({
             )}
           </div>
         </ScrollArea>
+        </div>
         
         {/* Input Area */}
         {stage !== STAGES.COMPLETE && (

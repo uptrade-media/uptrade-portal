@@ -102,7 +102,7 @@ export const useSignalStore = create(
       knowledge: [],
       knowledgeLoading: false,
       knowledgePagination: { page: 1, total: 0, pages: 0 },
-      knowledgeStats: { total: 0, byType: {} },
+      knowledgeStats: { totalChunks: 0, byType: {}, withEmbeddings: 0, lastUpdated: null },
       
       // FAQs state
       faqs: [],
@@ -426,6 +426,31 @@ export const useSignalStore = create(
       // Knowledge Base Actions
       // ─────────────────────────────────────────────────────────────────────────
       
+      /**
+       * Fetch knowledge stats from dedicated endpoint
+       * Returns totalChunks, byType breakdown, withEmbeddings count
+       */
+      fetchKnowledgeStats: async (projectId) => {
+        try {
+          const res = await signalApi.get('/knowledge/stats', { 
+            params: { projectId } 
+          })
+          const data = res.data?.data || res.data
+          set({ 
+            knowledgeStats: {
+              totalChunks: data.totalChunks || 0,
+              byType: data.byType || {},
+              withEmbeddings: data.withEmbeddings || 0,
+              lastUpdated: data.lastUpdated || null
+            }
+          })
+          return data
+        } catch (error) {
+          console.error('Failed to fetch knowledge stats:', error)
+          return { totalChunks: 0, byType: {}, withEmbeddings: 0, lastUpdated: null }
+        }
+      },
+      
       fetchKnowledge: async (projectId, options = {}) => {
         set({ knowledgeLoading: true })
         try {
@@ -436,7 +461,6 @@ export const useSignalStore = create(
           set({ 
             knowledge: data.items || data.chunks || [],
             knowledgePagination: data.pagination || { page: 1, total: 0, pages: 0 },
-            knowledgeStats: data.stats || { total: 0, byType: {} },
             knowledgeLoading: false
           })
           return data

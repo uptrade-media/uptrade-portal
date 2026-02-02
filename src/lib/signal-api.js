@@ -369,10 +369,11 @@ export const skillsApi = {
   },
   
   /**
-   * Invoke a skill tool
+   * Invoke a skill tool (POST /skills/tools/:skill/:tool so fixed routes like
+   * /skills/seo/blog-ideas are not shadowed by the generic param route)
    */
   invoke: async (skillKey, tool, params) => {
-    const response = await signalApi.post(`/skills/${skillKey}/${tool}`, params)
+    const response = await signalApi.post(`/skills/tools/${skillKey}/${tool}`, params)
     return response.data.data
   },
 }
@@ -1275,6 +1276,62 @@ export const signalSeoApi = {
       citationLevel: params.citationLevel ?? 'standard',
     })
     return response.data.data
+  },
+
+  // ============================================================================
+  // BLOG PIPELINE (Ashbound-inspired phased generation)
+  // ============================================================================
+
+  /**
+   * Generate a blog post using the new phased pipeline
+   * Returns complete blog with TOC, FAQs, schemas, and quality score
+   */
+  generateBlogPipeline: async (projectId, params, options = {}) => {
+    const response = await signalApi.post('/skills/seo/blog/pipeline/generate', {
+      projectId,
+      topic: params.topic,
+      targetKeyword: params.targetKeyword || params.target_keyword,
+      contentType: params.contentType || params.content_type || 'how_to_guide',
+      authorId: params.authorId || params.author_id,
+      wordCountTarget: params.targetWordCount || params.wordCountTarget || params.word_count_target || 2000,
+      tone: params.tone,
+      categoryId: params.categoryId || params.category_id,
+      publishImmediately: params.publishImmediately ?? false,
+    }, {
+      timeout: options.timeout || 120000, // 2 minute timeout for full pipeline
+    })
+    return response.data.data || response.data
+  },
+
+  /**
+   * Plan a blog post without generating (for preview/approval)
+   * Returns outline, section plans, suggested content
+   */
+  planBlogPipeline: async (projectId, params) => {
+    const response = await signalApi.post('/skills/seo/blog/pipeline/plan', {
+      projectId,
+      topic: params.topic,
+      targetKeyword: params.targetKeyword || params.target_keyword,
+      contentType: params.contentType || params.content_type || 'how_to_guide',
+      authorId: params.authorId || params.author_id,
+      wordCountTarget: params.targetWordCount || params.wordCountTarget || params.word_count_target || 2000,
+      tone: params.tone,
+      categoryId: params.categoryId || params.category_id,
+    })
+    return response.data.data || response.data
+  },
+
+  /**
+   * Generate blog from an existing plan (after approval)
+   */
+  generateBlogFromPlan: async (projectId, planId) => {
+    const response = await signalApi.post('/skills/seo/blog/pipeline/generate-from-plan', {
+      projectId,
+      planId,
+    }, {
+      timeout: 120000,
+    })
+    return response.data.data || response.data
   },
 
   // ============================================================================
