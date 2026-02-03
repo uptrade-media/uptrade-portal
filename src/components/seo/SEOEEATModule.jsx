@@ -426,8 +426,8 @@ export default function SEOEEATModule({ projectId }) {
         linkedin_url: author.linkedin_url || '',
         twitter_url: author.twitter_url || '',
         website_url: author.website_url || '',
-        expertise_areas: author.expertise_areas || author.expertise || [],
-        credentials: author.credentials || [],
+        expertise_areas: (author.expertise_areas || author.expertise || []).join(', '),
+        credentials: (author.credentials || []).join(', '),
         years_experience: author.years_experience?.toString() || '',
         is_default: author.is_default || false,
       })
@@ -444,8 +444,8 @@ export default function SEOEEATModule({ projectId }) {
         linkedin_url: '',
         twitter_url: '',
         website_url: '',
-        expertise_areas: [],
-        credentials: [],
+        expertise_areas: '',
+        credentials: '',
         years_experience: '',
         is_default: false,
       })
@@ -473,8 +473,16 @@ export default function SEOEEATModule({ projectId }) {
         linkedin_url: authorForm.linkedin_url.trim() || undefined,
         twitter_url: authorForm.twitter_url.trim() || undefined,
         website_url: authorForm.website_url.trim() || undefined,
-        expertise_areas: authorForm.expertise_areas.length > 0 ? authorForm.expertise_areas : undefined,
-        credentials: authorForm.credentials.length > 0 ? authorForm.credentials : undefined,
+        expertise_areas: authorForm.expertise_areas
+          ? (typeof authorForm.expertise_areas === 'string' 
+              ? authorForm.expertise_areas.split(',').map(s => s.trim()).filter(Boolean)
+              : authorForm.expertise_areas)
+          : undefined,
+        credentials: authorForm.credentials
+          ? (typeof authorForm.credentials === 'string'
+              ? authorForm.credentials.split(',').map(s => s.trim()).filter(Boolean)
+              : authorForm.credentials)
+          : undefined,
         years_experience: authorForm.years_experience ? parseInt(authorForm.years_experience, 10) : undefined,
         is_default: authorForm.is_default,
       }
@@ -504,14 +512,12 @@ export default function SEOEEATModule({ projectId }) {
   
   // Handle expertise areas input (comma separated)
   const handleExpertiseChange = (value) => {
-    const areas = value.split(',').map(s => s.trim()).filter(Boolean)
-    setAuthorForm(prev => ({ ...prev, expertise_areas: areas }))
+    setAuthorForm(prev => ({ ...prev, expertise_areas: value }))
   }
   
   // Handle credentials input (comma separated)
   const handleCredentialsChange = (value) => {
-    const creds = value.split(',').map(s => s.trim()).filter(Boolean)
-    setAuthorForm(prev => ({ ...prev, credentials: creds }))
+    setAuthorForm(prev => ({ ...prev, credentials: value }))
   }
   
   // Fetch E-E-A-T data
@@ -952,7 +958,7 @@ export default function SEOEEATModule({ projectId }) {
                 <Label htmlFor="expertise">Expertise Areas (comma-separated)</Label>
                 <Input
                   id="expertise"
-                  value={authorForm.expertise_areas.join(', ')}
+                  value={authorForm.expertise_areas}
                   onChange={(e) => handleExpertiseChange(e.target.value)}
                   placeholder="SEO, Content Marketing, Local Business"
                 />
@@ -961,7 +967,7 @@ export default function SEOEEATModule({ projectId }) {
                 <Label htmlFor="credentials">Credentials (comma-separated)</Label>
                 <Input
                   id="credentials"
-                  value={authorForm.credentials.join(', ')}
+                  value={authorForm.credentials}
                   onChange={(e) => handleCredentialsChange(e.target.value)}
                   placeholder="MBA, Certified SEO Professional"
                 />

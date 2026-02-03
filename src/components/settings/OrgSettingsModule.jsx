@@ -271,7 +271,7 @@ export default function OrgSettings() {
                       </div>
                       <p className="text-sm text-muted-foreground">
                         {orgDetails?.billing_suspended 
-                          ? 'Signal AI is disabled and no charges are being incurred.'
+                          ? 'Signal AI remains enabled, but usage is not being tracked or billed.'
                           : 'Signal AI usage is being tracked and billed normally.'}
                       </p>
                       {orgDetails?.billing_suspended_at && (
@@ -313,7 +313,7 @@ export default function OrgSettings() {
                               billing_suspended_by: null
                             }))
                             
-                            toast.success('Billing resumed - Signal AI is now active')
+                            toast.success('Billing resumed - Signal AI usage tracking and billing restored')
                           } catch (err) {
                             console.error('Failed to resume billing:', err)
                             toast.error('Failed to resume billing')
@@ -336,7 +336,7 @@ export default function OrgSettings() {
                     <Info className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-400" />
                     <div className="text-sm text-amber-700 dark:text-amber-300">
                       <p><strong>Use Case:</strong> Suspend billing when setting up a new project to use Signal for configuration without incurring charges.</p>
-                      <p className="mt-2"><strong>Effect:</strong> All Signal AI features will be disabled org-wide until billing is resumed.</p>
+                      <p className="mt-2"><strong>Effect:</strong> Signal AI remains fully functional, but usage is not tracked or billed. Use this for testing, setup, or troubleshooting.</p>
                     </div>
                   </div>
                 </CardContent>
@@ -352,7 +352,7 @@ export default function OrgSettings() {
                     Suspend Signal Billing
                   </DialogTitle>
                   <DialogDescription>
-                    This will disable all Signal AI features for <strong>{currentOrg?.name}</strong> until billing is resumed.
+                    Signal AI will remain enabled for <strong>{currentOrg?.name}</strong>, but usage will not be tracked or billed until billing is resumed.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -369,9 +369,9 @@ export default function OrgSettings() {
                       This will be visible to other admins reviewing billing history.
                     </p>
                   </div>
-                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                    <p className="text-sm text-amber-700 dark:text-amber-300">
-                      <strong>Warning:</strong> While suspended, Echo, AI insights, and all Signal-powered features will be unavailable org-wide.
+                  <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      <strong>Note:</strong> Signal AI features remain fully functional during suspension. Only billing/usage tracking is paused. This is useful for testing and setup without incurring costs.
                     </p>
                   </div>
                 </div>
@@ -405,7 +405,7 @@ export default function OrgSettings() {
                           billing_suspended_by: user.id
                         }))
                         
-                        toast.success('Billing suspended - Signal AI is now disabled')
+                        toast.success('Billing suspended - Signal AI usage is no longer being tracked or billed')
                         setSuspendModalOpen(false)
                       } catch (err) {
                         console.error('Failed to suspend billing:', err)

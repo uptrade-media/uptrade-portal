@@ -2471,16 +2471,16 @@ export const blogApi = {
   
   // Blog Authors (E-E-A-T)
   listAuthors: (projectId, activeOnly = true) =>
-    portalApi.get(`/blog/${projectId}/authors`, { params: { activeOnly } }).then(res => res.data),
+    portalApi.get(`/blog/projects/${projectId}/authors`, { params: { activeOnly } }).then(res => res.data),
   
   getAuthor: (authorId) =>
     portalApi.get(`/blog/authors/${authorId}`).then(res => res.data),
   
   getDefaultAuthor: (projectId) =>
-    portalApi.get(`/blog/${projectId}/authors/default`).then(res => res.data),
+    portalApi.get(`/blog/projects/${projectId}/authors/default`).then(res => res.data),
   
   createAuthor: (projectId, data) =>
-    portalApi.post(`/blog/${projectId}/authors`, data).then(res => res.data),
+    portalApi.post(`/blog/projects/${projectId}/authors`, data).then(res => res.data),
   
   updateAuthor: (authorId, data) =>
     portalApi.put(`/blog/authors/${authorId}`, data).then(res => res.data),

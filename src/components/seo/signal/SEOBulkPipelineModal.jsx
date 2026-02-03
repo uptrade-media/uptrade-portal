@@ -110,9 +110,76 @@ export function SEOBulkPipelineModal({
   const abortRef = useRef(false)
   const pauseRef = useRef(false)
 
-  // Reset state when modal opens/closes
+  const jobKey = `seo-bulk-pipeline-${projectId}`
+
+  // Save job state to localStorage
+  const saveJobState = useCallback(() => {
+    if (hasStarted && !isComplete) {
+      localStorage.setItem(jobKey, JSON.stringify({
+        pageStatuses,
+        currentPageIndex,
+        isRunning,
+        isPaused,
+        hasStarted,
+        totalDuration,
+        timestamp: Date.now()
+      }))
+    }
+  }, [jobKey, pageStatuses, currentPageIndex, isRunning, isPaused, hasStarted, totalDuration])
+
+  // Clear job state from localStorage
+  const clearJobState = useCallback(() => {
+    localStorage.removeItem(jobKey)
+  }, [jobKey])
+
+  // Restore job state on mount
   useEffect(() => {
-    if (!open) {
+    const savedState = localStorage.getItem(jobKey)
+    if (savedState && !hasStarted) {
+      try {
+        const state = JSON.parse(savedState)
+        // Only restore if job was saved within last 24 hours
+        if (Date.now() - state.timestamp < 24 * 60 * 60 * 1000) {
+          setPageStatuses(state.pageStatuses || {})
+          setCurrentPageIndex(state.currentPageIndex || -1)
+          setIsRunning(false) // Don't auto-resume
+          setIsPaused(true) // Start paused
+          setHasStarted(state.hasStarted || false)
+          setTotalDuration(state.totalDuration || 0)
+          pauseRef.current = true
+          
+          // Re-open modal if job was running
+          if (state.hasStarted && !open) {
+            onOpenChange(true)
+          }
+        } else {
+          // Job too old, clear it
+          clearJobState()
+        }
+      } catch (e) {
+        console.error('Failed to restore job state:', e)
+        clearJobState()
+      }
+    }
+  }, [jobKey, open, onOpenChange, clearJobState, hasStarted])
+
+  // Save state when it changes
+  useEffect(() => {
+    saveJobState()
+  }, [saveJobState])
+
+  // Calculate progress
+  const completedCount = Object.values(pageStatuses).filter(
+    s => s.status === PAGE_STATUS.COMPLETE || s.status === PAGE_STATUS.FAILED || s.status === PAGE_STATUS.SKIPPED
+  ).length
+  const failedCount = Object.values(pageStatuses).filter(s => s.status === PAGE_STATUS.FAILED).length
+  const progress = pagesList.length > 0 ? Math.round((completedCount / pagesList.length) * 100) : 0
+  const isComplete = completedCount === pagesList.length && hasStarted
+
+  // Reset state when modal closes (but keep in localStorage if incomplete)
+  useEffect(() => {
+    if (!open && isComplete) {
+      clearJobState()
       setPageStatuses({})
       setCurrentPageIndex(-1)
       setIsRunning(false)
@@ -122,15 +189,7 @@ export function SEOBulkPipelineModal({
       abortRef.current = false
       pauseRef.current = false
     }
-  }, [open])
-
-  // Calculate progress
-  const completedCount = Object.values(pageStatuses).filter(
-    s => s.status === PAGE_STATUS.COMPLETE || s.status === PAGE_STATUS.FAILED || s.status === PAGE_STATUS.SKIPPED
-  ).length
-  const failedCount = Object.values(pageStatuses).filter(s => s.status === PAGE_STATUS.FAILED).length
-  const progress = pagesList.length > 0 ? Math.round((completedCount / pagesList.length) * 100) : 0
-  const isComplete = completedCount === pagesList.length && hasStarted
+  }, [open, isComplete, clearJobState])
 
   // Estimate remaining time based on average duration
   const completedDurations = Object.values(pageStatuses)
@@ -157,17 +216,27 @@ export function SEOBulkPipelineModal({
       const result = await signalSeoApi.runPipeline(projectId, page.id, {})
       
       // Check if any phase failed
-      const hasFailed = result.state?.phaseResults?.some(r => !r.ok)
+      const failedPhase = result.state?.phaseResults?.find(r => !r.ok)
+      const hasFailed = !!failedPhase
       
       const duration = Date.now() - startTime
       setTotalDuration(prev => prev + duration)
+      
+      // Build detailed error message - check multiple sources
+      let errorMsg = undefined
+      if (hasFailed) {
+        // Try error field first, then blockingIssues from data, then generic
+        const blockingIssues = failedPhase.data?.blockingIssues?.join(', ')
+        errorMsg = failedPhase.error || blockingIssues || `Phase ${failedPhase.phase} failed`
+        console.error(`Pipeline failed for ${page.path}:`, failedPhase)
+      }
       
       setPageStatuses(prev => ({
         ...prev,
         [page.id]: { 
           status: hasFailed ? PAGE_STATUS.FAILED : PAGE_STATUS.COMPLETE,
           duration,
-          error: hasFailed ? 'Pipeline phase failed' : undefined
+          error: errorMsg
         }
       }))
     } catch (error) {
@@ -248,105 +317,120 @@ export function SEOBulkPipelineModal({
     if (isRunning) {
       abortRef.current = true
     }
-    onOpenChange(false)
-    if (isComplete && onComplete) {
-      onComplete()
+    
+    // Clear job state if complete
+    if (isComplete) {
+      clearJobState()
+      if (onComplete) {
+        onComplete()
+      }
     }
+    
+    onOpenChange(false)
   }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Rocket className="h-5 w-5" style={{ color: 'var(--brand-primary)' }} />
             Deep Optimize All Pages
+            {hasStarted && !isRunning && isPaused && (
+              <Badge variant="secondary" className="text-xs">
+                Restored
+              </Badge>
+            )}
           </DialogTitle>
           <DialogDescription>
-            Running comprehensive 9-phase Signal optimization for {pagesList.length} pages.
-            This may take {formatDuration(pagesList.length * 30000)} or more.
+            {hasStarted && !isRunning && isPaused ? (
+              <>Resuming optimization for {pagesList.length} pages. Click Resume to continue.</>
+            ) : (
+              <>Running comprehensive 9-phase Signal optimization for {pagesList.length} pages.
+              This may take {formatDuration(pagesList.length * 30000)} or more.</>
+            )}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto flex flex-col gap-4 min-h-0">
           {/* Progress Overview */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-4">
-                <span>
-                  {completedCount} / {pagesList.length} pages
-                </span>
-                {failedCount > 0 && (
-                  <Badge variant="destructive" className="text-xs">
-                    {failedCount} failed
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-4 text-muted-foreground">
-                <div className="flex items-center gap-1">
-                  <Clock className="h-4 w-4" />
-                  <span>Elapsed: {formatDuration(totalDuration)}</span>
-                </div>
-                {isRunning && !isComplete && remainingPages > 0 && (
-                  <span>~{formatDuration(estimatedRemaining)} remaining</span>
-                )}
-              </div>
+          <div className="space-y-3 flex-shrink-0">
+          <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-4">
+              <span>
+                {completedCount} / {pagesList.length} pages
+              </span>
+              {failedCount > 0 && (
+                <Badge variant="destructive" className="text-xs">
+                  {failedCount} failed
+                </Badge>
+              )}
             </div>
-            <Progress value={progress} className="h-3" />
+            <div className="flex items-center gap-4 text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <Clock className="h-4 w-4" />
+                <span>Elapsed: {formatDuration(totalDuration)}</span>
+              </div>
+              {isRunning && !isComplete && remainingPages > 0 && (
+                <span>~{formatDuration(estimatedRemaining)} remaining</span>
+              )}
+            </div>
           </div>
-
-          {/* Page List */}
-          <ScrollArea className="flex-1 border rounded-lg">
-            <div className="p-2 space-y-1">
-              {pagesList.map((page, index) => (
-                <PageRow
-                  key={page.id}
-                  page={page}
-                  status={pageStatuses[page.id]?.status || PAGE_STATUS.PENDING}
-                  duration={pageStatuses[page.id]?.duration}
-                  error={pageStatuses[page.id]?.error}
-                />
-              ))}
-            </div>
-          </ScrollArea>
-
-          {/* Status Message */}
-          {isComplete && (
-            <Card className={failedCount > 0 ? "border-yellow-500/30 bg-yellow-500/5" : "border-green-500/30 bg-green-500/5"}>
-              <CardContent className="py-3">
-                <div className="flex items-center gap-3">
-                  {failedCount > 0 ? (
-                    <>
-                      <AlertTriangle className="h-5 w-5 text-yellow-400" />
-                      <div>
-                        <div className="font-medium text-yellow-400">
-                          Optimization completed with {failedCount} failures
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {completedCount - failedCount} pages optimized successfully
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="h-5 w-5 text-green-400" />
-                      <div>
-                        <div className="font-medium text-green-400">
-                          All pages optimized successfully!
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Total time: {formatDuration(totalDuration)}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          <Progress value={progress} className="h-3" />
         </div>
 
-        <DialogFooter className="flex gap-2">
+        {/* Page List */}
+        <div className="flex-1 min-h-0 overflow-y-auto border rounded-lg">
+          <div className="p-2 space-y-1">
+            {pagesList.map((page, index) => (
+              <PageRow
+                key={page.id}
+                page={page}
+                status={pageStatuses[page.id]?.status || PAGE_STATUS.PENDING}
+                duration={pageStatuses[page.id]?.duration}
+                error={pageStatuses[page.id]?.error}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Status Message */}
+        {isComplete && (
+          <Card className={cn("flex-shrink-0", failedCount > 0 ? "border-yellow-500/30 bg-yellow-500/5" : "border-green-500/30 bg-green-500/5")}>
+            <CardContent className="py-3">
+              <div className="flex items-center gap-3">
+                {failedCount > 0 ? (
+                  <>
+                    <AlertTriangle className="h-5 w-5 text-yellow-400" />
+                    <div>
+                      <div className="font-medium text-yellow-400">
+                        Optimization completed with {failedCount} failures
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {completedCount - failedCount} pages optimized successfully
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="h-5 w-5 text-green-400" />
+                    <div>
+                      <div className="font-medium text-green-400">
+                        All pages optimized successfully!
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Total time: {formatDuration(totalDuration)}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      <DialogFooter className="flex-shrink-0 flex gap-2">
           {!hasStarted ? (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>

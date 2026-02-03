@@ -363,8 +363,8 @@ export function SEOPipelineModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <SignalIcon className="h-5 w-5" style={{ color: 'var(--brand-primary)' }} />
             Signal SEO Optimization
@@ -374,28 +374,28 @@ export function SEOPipelineModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden flex flex-col gap-4">
-          {/* Progress bar */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                {isComplete 
-                  ? (hasFailed ? 'Pipeline completed with issues' : 'Pipeline complete!')
-                  : `Phase ${currentPhaseIndex + 1} of ${PIPELINE_PHASES.length}`
-                }
-              </span>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Clock className="h-4 w-4" />
-                <span>{(totalDuration / 1000).toFixed(1)}s</span>
-              </div>
+        {/* Progress bar */}
+        <div className="space-y-2 flex-shrink-0">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">
+              {isComplete 
+                ? (hasFailed ? 'Pipeline completed with issues' : 'Pipeline complete!')
+                : `Phase ${currentPhaseIndex + 1} of ${PIPELINE_PHASES.length}`
+              }
+            </span>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>{(totalDuration / 1000).toFixed(1)}s</span>
             </div>
-            <Progress value={isComplete ? 100 : progress} className="h-2" />
           </div>
+          <Progress value={isComplete ? 100 : progress} className="h-2" />
+        </div>
 
-          <Separator />
+        <Separator className="flex-shrink-0" />
 
-          {/* Phase list or results */}
-          <ScrollArea className="flex-1">
+        {/* Phase list or results */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="space-y-4 pb-4">
             {!isComplete ? (
               <div className="space-y-1">
                 {PIPELINE_PHASES.map((phase) => (
@@ -410,10 +410,10 @@ export function SEOPipelineModal({
             ) : (
               <OptimizationResults plan={pipelineState?.plan} />
             )}
-          </ScrollArea>
+          </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-shrink-0">
           {isComplete ? (
             <>
               {hasFailed && (

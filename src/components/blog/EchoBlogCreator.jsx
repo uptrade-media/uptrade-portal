@@ -46,6 +46,89 @@ const STAGES = {
   COMPLETE: 'complete'
 }
 
+// Format markdown-style text in Echo responses
+const formatMessage = (text) => {
+  if (!text) return null
+  
+  // Split by lines and process each
+  const lines = text.split('\n')
+  const formatted = []
+  let currentList = null
+  let listType = null
+  
+  lines.forEach((line, idx) => {
+    // Headings
+    if (line.startsWith('## ')) {
+      if (currentList) {
+        formatted.push(currentList)
+        currentList = null
+      }
+      formatted.push(<h3 key={idx} className="font-semibold text-base mt-3 mb-2">{line.replace('## ', '')}</h3>)
+    }
+    // Bold text (convert **text** to bold)
+    else if (line.includes('**')) {
+      if (currentList) {
+        formatted.push(currentList)
+        currentList = null
+      }
+      const parts = line.split(/\*\*/)
+      formatted.push(
+        <p key={idx} className="mb-2">
+          {parts.map((part, i) => i % 2 === 1 ? <strong key={i}>{part}</strong> : part)}
+        </p>
+      )
+    }
+    // List items
+    else if (line.match(/^[•\-\*]\s/)) {
+      const content = line.replace(/^[•\-\*]\s/, '')
+      if (!currentList) {
+        currentList = { key: idx, items: [], type: 'ul' }
+      }
+      currentList.items.push(<li key={`${idx}-${currentList.items.length}`} className="ml-4">{content}</li>)
+    }
+    // Numbered lists
+    else if (line.match(/^\d+\.\s/)) {
+      const content = line.replace(/^\d+\.\s/, '')
+      if (!currentList || currentList.type !== 'ol') {
+        if (currentList) formatted.push(currentList)
+        currentList = { key: idx, items: [], type: 'ol' }
+      }
+      currentList.items.push(<li key={`${idx}-${currentList.items.length}`} className="ml-4">{content}</li>)
+    }
+    // Regular text
+    else if (line.trim()) {
+      if (currentList) {
+        formatted.push(currentList)
+        currentList = null
+      }
+      formatted.push(<p key={idx} className="mb-2">{line}</p>)
+    }
+    // Empty line
+    else {
+      if (currentList) {
+        formatted.push(currentList)
+        currentList = null
+      }
+    }
+  })
+  
+  if (currentList) {
+    formatted.push(currentList)
+  }
+  
+  return formatted.map(item => {
+    if (item && typeof item === 'object' && item.items) {
+      const ListTag = item.type === 'ol' ? 'ol' : 'ul'
+      return (
+        <ListTag key={item.key} className={cn("mb-2 space-y-1", item.type === 'ol' ? 'list-decimal' : 'list-disc')}>
+          {item.items}
+        </ListTag>
+      )
+    }
+    return item
+  })
+}
+
 // Message types
 const MessageBubble = ({ message, isUser, isTyping }) => (
   <div className={cn(
@@ -73,7 +156,7 @@ const MessageBubble = ({ message, isUser, isTyping }) => (
           <div className="w-2 h-2 rounded-full bg-current animate-bounce" style={{ animationDelay: '300ms' }} />
         </div>
       ) : (
-        <div className="text-sm whitespace-pre-wrap">{message}</div>
+        <div className="text-sm">{isUser ? message : formatMessage(message)}</div>
       )}
     </div>
     {isUser && (
