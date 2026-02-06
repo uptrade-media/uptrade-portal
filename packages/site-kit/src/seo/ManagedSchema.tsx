@@ -122,11 +122,13 @@ export async function ManagedSchema({
     ? allSchemas[0]
     : {
         '@context': 'https://schema.org',
-        '@graph': allSchemas.map(s => {
-          // Remove @context from individual schemas when in graph
-          const { '@context': _, ...rest } = s as Record<string, unknown>
-          return rest
-        }),
+        '@graph': allSchemas
+          .filter(s => s && typeof s === 'object')
+          .map(s => {
+            // Remove @context from individual schemas when in graph
+            const { '@context': _, ...rest } = s as Record<string, unknown>
+            return rest
+          }),
       }
 
   // Add @context if not in graph mode

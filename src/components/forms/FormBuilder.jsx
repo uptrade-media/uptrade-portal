@@ -108,8 +108,7 @@ import {
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { useCommerceOfferings, commerceKeys } from '@/lib/hooks'
-import { useQueryClient } from '@tanstack/react-query'
+import { useCommerceOfferings } from '@/lib/hooks'
 import { engageApi } from '@/lib/portal-api'
 
 // =============================================================================
@@ -1915,18 +1914,16 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
   })
 
   // Load services for linking
-  const { offerings, fetchOfferings } = useCommerceStore()
+  const { data: offerings = [] } = useCommerceOfferings(projectId, { type: 'service' })
   const services = offerings.filter(o => o.type === 'service')
   
   // Load engage elements for post-submit popup
   const [engageElements, setEngageElements] = useState([])
   const [loadingEngageElements, setLoadingEngageElements] = useState(false)
   
-  // Fetch services and engage elements on mount
+  // Fetch engage elements on mount
   useEffect(() => {
     if (projectId) {
-      fetchOfferings(projectId, { type: 'service' })
-      
       // Load engage elements (popups, nudges, etc.)
       setLoadingEngageElements(true)
       engageApi.getElements({ projectId })
@@ -1941,7 +1938,7 @@ export default function FormBuilder({ formId, projectId, initialData, onSave, on
         .catch(err => console.error('Failed to load engage elements:', err))
         .finally(() => setLoadingEngageElements(false))
     }
-  }, [projectId, fetchOfferings])
+  }, [projectId])
   
   // Normalize field type from various sources (HTML types, scanner, etc.) to FormBuilder types
   function normalizeFieldType(type) {

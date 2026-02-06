@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { format, formatDistanceToNow, isValid } from 'date-fns'
+import FormPreview from '@/components/forms/FormPreview'
 
 export default function FormDetail() {
   const { id } = useParams()
@@ -161,15 +162,7 @@ export default function FormDetail() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="p-8 bg-white dark:bg-gray-900 rounded-lg border border-[var(--glass-border)]">
-                {/* Form preview would render here */}
-                <p className="text-center text-[var(--text-tertiary)]">
-                  Form preview coming soon...
-                </p>
-                <p className="text-center text-sm text-[var(--text-tertiary)] mt-2">
-                  {form.fields?.length || 0} fields configured
-                </p>
-              </div>
+              <FormPreview form={form} fields={form.fields || []} />
             </CardContent>
           </Card>
         </TabsContent>

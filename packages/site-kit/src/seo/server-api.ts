@@ -16,12 +16,13 @@ import 'server-only' // This ensures the module can only be imported server-side
 
 function getSecureApiConfig() {
   // Use private env vars that won't be bundled into client code
+  // Falls back to NEXT_PUBLIC_ vars since they contain the same key anyway
   const apiUrl = process.env.UPTRADE_API_URL || process.env.NEXT_PUBLIC_UPTRADE_API_URL || 'https://api.uptrademedia.com'
-  const apiKey = process.env.UPTRADE_API_KEY || ''
-  const projectId = process.env.UPTRADE_PROJECT_ID || ''
+  const apiKey = process.env.UPTRADE_API_KEY || process.env.NEXT_PUBLIC_UPTRADE_API_KEY || ''
+  const projectId = process.env.UPTRADE_PROJECT_ID || process.env.NEXT_PUBLIC_UPTRADE_PROJECT_ID || ''
   
   if (!apiKey) {
-    throw new Error('@uptrade/seo: UPTRADE_API_KEY environment variable is required for server-side SEO functions')
+    throw new Error('@uptrade/seo: UPTRADE_API_KEY or NEXT_PUBLIC_UPTRADE_API_KEY environment variable is required for server-side SEO functions')
   }
   
   return { apiUrl, apiKey, projectId }

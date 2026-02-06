@@ -28,8 +28,8 @@ if (process.env.NODE_ENV === 'development') {
 // ============================================
 
 function getApiConfig() {
-  const apiUrl = process.env.NEXT_PUBLIC_UPTRADE_API_URL || 'https://api.uptrademedia.com'
-  const apiKey = process.env.NEXT_PUBLIC_UPTRADE_API_KEY || ''
+  const apiUrl = process.env.UPTRADE_API_URL || process.env.NEXT_PUBLIC_UPTRADE_API_URL || 'https://api.uptrademedia.com'
+  const apiKey = process.env.UPTRADE_API_KEY || process.env.NEXT_PUBLIC_UPTRADE_API_KEY || ''
   return { apiUrl, apiKey }
 }
 
@@ -37,7 +37,7 @@ async function apiPost<T>(endpoint: string, body: Record<string, any> = {}): Pro
   const { apiUrl, apiKey } = getApiConfig()
   
   if (!apiKey) {
-    console.error('@uptrade/seo: No API key configured. Set NEXT_PUBLIC_UPTRADE_API_KEY.')
+    console.error('@uptrade/seo: No API key configured. Set UPTRADE_API_KEY.')
     return null
   }
   
@@ -249,7 +249,7 @@ export async function registerSitemap(
   const { apiUrl, apiKey } = getApiConfig()
   
   if (!apiKey) {
-    console.error('@uptrade/seo: No API key configured. Set NEXT_PUBLIC_UPTRADE_API_KEY.')
+    console.error('@uptrade/seo: No API key configured. Set UPTRADE_API_KEY.')
     return { success: false, created: 0, updated: 0 }
   }
   
@@ -286,8 +286,8 @@ export async function registerSitemap(
  * Get Signal API config for AI visibility features
  */
 function getSignalApiConfig() {
-  const apiUrl = process.env.NEXT_PUBLIC_SIGNAL_API_URL || 'https://signal.uptrademedia.com'
-  const apiKey = process.env.NEXT_PUBLIC_UPTRADE_API_KEY || ''
+  const apiUrl = process.env.SIGNAL_API_URL || process.env.NEXT_PUBLIC_SIGNAL_API_URL || 'https://signal.uptrademedia.com'
+  const apiKey = process.env.UPTRADE_API_KEY || process.env.NEXT_PUBLIC_UPTRADE_API_KEY || ''
   return { apiUrl, apiKey }
 }
 

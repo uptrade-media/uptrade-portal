@@ -1,3 +1,5 @@
+'use client'
+
 /**
  * @uptrade/site-kit/forms
  * 

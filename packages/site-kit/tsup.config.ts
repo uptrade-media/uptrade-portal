@@ -96,10 +96,10 @@ export default defineConfig({
   minify: false,
   target: 'es2020',
   async onSuccess() {
-    // Add shebang to CLI file after build
     const fs = await import('fs/promises')
     const path = await import('path')
     
+    // Add shebang to CLI file after build
     const cliFiles = ['dist/cli/index.js', 'dist/cli/index.mjs']
     for (const file of cliFiles) {
       try {
@@ -114,6 +114,34 @@ export default defineConfig({
         
         // Make executable
         await fs.chmod(fullPath, 0o755)
+      } catch {
+        // File might not exist
+      }
+    }
+    
+    // Add 'use client' directive to client-side modules
+    // This is needed because tsup strips the directive during bundling
+    const clientModules = [
+      'dist/forms/index.js',
+      'dist/forms/index.mjs',
+      'dist/analytics/index.js',
+      'dist/analytics/index.mjs',
+      'dist/engage/index.js',
+      'dist/engage/index.mjs',
+      'dist/setup/client.js',
+      'dist/setup/client.mjs',
+    ]
+    
+    for (const file of clientModules) {
+      try {
+        const fullPath = path.join(process.cwd(), file)
+        let content = await fs.readFile(fullPath, 'utf-8')
+        
+        // Only add if not already present
+        if (!content.startsWith("'use client'") && !content.startsWith('"use client"')) {
+          content = "'use client';\n" + content
+          await fs.writeFile(fullPath, content, 'utf-8')
+        }
       } catch {
         // File might not exist
       }

@@ -7,8 +7,8 @@
 
 'use client'
 
-import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo } from 'react'
-import { usePathname, useSearchParams } from 'next/navigation'
+import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import type { AnalyticsContextValue, TrackEventOptions, TrackConversionOptions } from './types'
 import { WebVitals } from './WebVitals'
 
@@ -606,7 +606,24 @@ export function AnalyticsProvider({
   debug = false,
 }: AnalyticsProviderProps) {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
+  // Use state to track query string changes instead of useSearchParams (avoids Suspense requirement)
+  const [queryString, setQueryString] = useState('')
+  
+  // Listen for URL changes including query string
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    // Set initial query string
+    setQueryString(window.location.search)
+    
+    // Listen for popstate (back/forward navigation)
+    const handlePopState = () => {
+      setQueryString(window.location.search)
+    }
+    
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [pathname]) // Re-check when pathname changes
   
   const visitorIdRef = useRef<string>('')
   const sessionIdRef = useRef<string>('')
@@ -752,7 +769,7 @@ export function AnalyticsProvider({
     
     // Use requestIdleCallback to defer tracking until browser is idle
     scheduleIdleTask(() => trackPageView())
-  }, [pathname, searchParams, propApiUrl, propApiKey, trackPageViews, excludePaths, debug])
+  }, [pathname, queryString, propApiUrl, propApiKey, trackPageViews, excludePaths, debug, validateAgainstSitemap])
 
   // ============================================
   // Journey Path Tracking
