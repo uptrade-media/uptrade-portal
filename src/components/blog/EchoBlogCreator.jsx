@@ -31,7 +31,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { signalApi, skillsApi, signalSeoApi } from '@/lib/signal-api'
-import { portalApi } from '@/lib/portal-api'
+import { portalApi, filesApi } from '@/lib/portal-api'
 import useAuthStore from '@/lib/auth-store'
 import SignalIcon from '@/components/ui/SignalIcon'
 import { toast } from 'sonner'
@@ -175,27 +175,39 @@ const TopicCard = ({ topic, onSelect }) => (
   >
     <div className="flex items-start justify-between gap-2">
       <div className="flex-1">
-        <h4 className="font-medium text-sm mb-1 group-hover:text-[var(--brand-primary)]">
-          {topic.title}
-        </h4>
+        <div className="flex items-center gap-2 mb-1">
+          <h4 className="font-medium text-sm group-hover:text-[var(--brand-primary)]">
+            {topic.title}
+          </h4>
+          {topic.trending && (
+            <Badge variant="outline" className="text-xs border-orange-500 text-orange-600 shrink-0">
+              🔥 Trending
+            </Badge>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground line-clamp-2">
-          {topic.contentAngle || topic.angle}
+          {topic.reasoning || topic.contentAngle || topic.angle}
         </p>
-        <div className="flex gap-2 mt-2">
+        <div className="flex flex-wrap gap-2 mt-2">
           <Badge variant="outline" className="text-xs">
             <Target className="w-3 h-3 mr-1" />
             {topic.primaryKeyword}
           </Badge>
-          {topic.trafficPotential && (
+          {topic.businessValue && (
             <Badge 
               variant="outline" 
               className={cn(
                 'text-xs',
-                topic.trafficPotential === 'high' && 'border-green-500 text-green-600',
-                topic.trafficPotential === 'medium' && 'border-yellow-500 text-yellow-600'
+                topic.businessValue === 'high' && 'border-green-500 text-green-600',
+                topic.businessValue === 'medium' && 'border-yellow-500 text-yellow-600'
               )}
             >
-              {topic.trafficPotential} potential
+              {topic.businessValue} value
+            </Badge>
+          )}
+          {topic.searchIntent && (
+            <Badge variant="outline" className="text-xs text-muted-foreground">
+              {topic.searchIntent}
             </Badge>
           )}
         </div>
@@ -330,11 +342,11 @@ export default function EchoBlogCreator({
       }
     } catch (error) {
       console.error('Failed to load categories:', error)
-      // Fallback categories
+      // Fallback categories - generic but usable
       setCategories([
-        { slug: 'insights', name: 'Insights' },
-        { slug: 'guides', name: 'Guides' },
-        { slug: 'news', name: 'News' }
+        { slug: 'guides', name: 'Guides', description: 'How-to guides and tutorials' },
+        { slug: 'news', name: 'News', description: 'Industry news and updates' },
+        { slug: 'tips', name: 'Tips', description: 'Tips and best practices' },
       ])
     }
   }
@@ -346,9 +358,13 @@ export default function EchoBlogCreator({
       const raw = data?.ideas ?? data?.topics ?? (Array.isArray(data) ? data : [])
       const topics = raw.map((t) => ({
         title: t.title ?? t.topic ?? t.headline ?? '',
-        primaryKeyword: t.primaryKeyword ?? t.keyword ?? t.targetKeyword ?? t.title ?? '',
-        contentAngle: t.angle ?? t.contentAngle ?? t.summary ?? '',
-        angle: t.angle ?? t.contentAngle ?? t.summary ?? '',
+        primaryKeyword: t.target_keyword ?? t.primaryKeyword ?? t.keyword ?? t.targetKeyword ?? t.title ?? '',
+        contentAngle: t.reasoning ?? t.angle ?? t.contentAngle ?? t.summary ?? '',
+        angle: t.reasoning ?? t.angle ?? t.contentAngle ?? t.summary ?? '',
+        reasoning: t.reasoning ?? '',
+        businessValue: t.business_value ?? t.businessValue ?? null,
+        searchIntent: t.search_intent ?? t.searchIntent ?? null,
+        trending: t.trending ?? false,
         trafficPotential: t.trafficPotential ?? t.potential ?? null,
       })).filter((t) => t.title)
       setTopicSuggestions(topics)
@@ -564,11 +580,41 @@ export default function EchoBlogCreator({
         }
       })
       
-      if (result?.success && result?.imageBase64) {
+      // Signal wraps tool results: { result: { success, imageUrl, ... }, durationMs, skill, tool }
+      const imageResult = result?.result || result
+      if (imageResult?.success && (imageResult?.imageUrl || imageResult?.imageBase64)) {
+        const imageUrl = imageResult.imageUrl || `data:${imageResult.mimeType || 'image/png'};base64,${imageResult.imageBase64}`
         setGeneratedImage({
-          url: `data:${result.mimeType || 'image/png'};base64,${result.imageBase64}`,
-          alt: `Featured image for: ${generatedPost.title}`
+          url: imageUrl,
+          alt: imageResult.altText || `Featured image for: ${generatedPost.title}`,
+          isUploaded: !!imageResult.imageUrl // Already uploaded if we got a URL
         })
+        
+        // Register file in Files module so it appears in the file browser
+        if (imageResult.imageUrl && currentProject?.id) {
+          try {
+            const urlParts = new URL(imageResult.imageUrl)
+            const pathMatch = urlParts.pathname.match(/\/files\/(.+)$/)
+            if (pathMatch) {
+              const storagePath = pathMatch[1]
+              const filename = imageResult.filename || storagePath.split('/').pop()
+              await filesApi.registerFile({
+                fileId: crypto.randomUUID(),
+                filename,
+                mimeType: imageResult.mimeType || 'image/png',
+                fileSize: 0,
+                storagePath,
+                publicUrl: imageResult.imageUrl,
+                projectId: currentProject.id,
+                folderPath: 'Blog/Featured',
+                category: 'content',
+                isPublic: true
+              })
+            }
+          } catch (regError) {
+            console.warn('Failed to register file in Files module:', regError)
+          }
+        }
         
         addBotMessage(`Here's your AI-generated featured image! Looking good? You can regenerate it or proceed to review your post.`)
       } else {
@@ -708,34 +754,53 @@ export default function EchoBlogCreator({
         }
       }
       
-      // Slug from title for API (required by Portal)
-      const slugFromTitle = (generatedPost.title || 'post')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '') || 'post'
+      // Use the selected category's slug directly - categories are per-project from blog_categories table
+      const categorySlug = selectedCategory?.slug || 'general'
 
-      // Create the blog post (E-E-A-T: author object + schema + faqItems)
-      const response = await portalApi.post('/blog/posts', {
-        title: generatedPost.title,
-        slug: generatedPost.slug || slugFromTitle,
-        content: generatedPost.content || generatedPost.contentHtml || '',
-        excerpt: generatedPost.excerpt || generatedPost.metadata?.metaDescription,
-        author: generatedPost.author,
-        faqItems: generatedPost.faqItems ?? generatedPost.faq_items,
-        schema: generatedPost.schema,
-        featuredImage: featuredImageUrl || '',
-        category: selectedCategory?.slug,
-        status: asDraft ? 'draft' : 'published',
-        publishedAt: asDraft ? null : new Date().toISOString(),
-        projectId: currentProject?.id,
-        orgId: currentOrg?.id
-      })
+      // Check if post was already created by the pipeline (has post_id)
+      const existingPostId = generatedPost?.post_id
+      
+      let response
+      if (existingPostId) {
+        // Update existing post (already created by pipeline Phase 6)
+        response = await portalApi.patch(`/blog/posts/${existingPostId}`, {
+          ...(featuredImageUrl && { featuredImage: featuredImageUrl }),
+          ...(featuredImageUrl && generatedImage?.alt && { featuredImageAlt: generatedImage.alt }),
+          category: categorySlug,
+          status: asDraft ? 'draft' : 'published',
+          publishedAt: asDraft ? null : new Date().toISOString(),
+        })
+      } else {
+        // Create new post (fallback for non-pipeline generation)
+        const postTitle = generatedPost?.title || topic || 'Untitled Post'
+        const slugFromTitle = postTitle
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)/g, '') || 'post'
+
+        response = await portalApi.post('/blog/posts', {
+          title: postTitle,
+          slug: generatedPost?.slug || slugFromTitle,
+          content: generatedPost?.content || generatedPost?.contentHtml || '',
+          excerpt: generatedPost?.excerpt || generatedPost?.metadata?.metaDescription,
+          author: generatedPost?.author,
+          faqItems: generatedPost?.faqItems ?? generatedPost?.faq_items,
+          schema: generatedPost?.schema,
+          featuredImage: featuredImageUrl || undefined,
+          featuredImageAlt: generatedImage?.alt || undefined,
+          category: categorySlug,
+          status: asDraft ? 'draft' : 'published',
+          publishedAt: asDraft ? null : new Date().toISOString(),
+          projectId: currentProject?.id,
+          orgId: currentOrg?.id
+        })
+      }
       
       simulateTyping(() => {
         if (asDraft) {
           addBotMessage(`Your blog post has been saved as a draft! You can find it in your blog dashboard to edit and publish when ready. 📝`)
         } else {
-          addBotMessage(`🎉 Congratulations! Your blog post is now live!\n\n**"${generatedPost.title}"**\n\nI'll continue monitoring its SEO performance and let you know if there are opportunities for improvement.`)
+          addBotMessage(`🎉 Congratulations! Your blog post is now live!\n\n**"${generatedPost?.title}"**\n\nI'll continue monitoring its SEO performance and let you know if there are opportunities for improvement.`)
         }
         setStage(STAGES.COMPLETE)
       })
@@ -1038,7 +1103,7 @@ export default function EchoBlogCreator({
                 <img 
                   src={generatedImage.url} 
                   alt={generatedImage.alt}
-                  className="w-full rounded-xl border"
+                  className="w-full max-w-md mx-auto rounded-xl border"
                 />
                 <p className="text-xs text-muted-foreground mt-2 text-center">
                   {generatedImage.alt}

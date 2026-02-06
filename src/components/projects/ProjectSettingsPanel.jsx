@@ -1009,7 +1009,7 @@ export default function ProjectSettingsPanel({ project, isAdmin, onProjectUpdate
           data={formData}
           onChange={(updatedData) => {
             setFormData(updatedData)
-            setHasUnsavedChanges(true)
+            setHasChanges(true)
           }}
           mode="edit"
           showIndustry={true}

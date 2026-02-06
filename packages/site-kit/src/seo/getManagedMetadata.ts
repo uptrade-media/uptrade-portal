@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { getSEOPageData, getABTest, recordABImpression } from './api'
+import { getSEOPageData, getABTest, recordABImpression } from './server-api'
 import type { 
   GetManagedMetadataOptions, 
   ManagedMetadataResult,

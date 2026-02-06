@@ -2462,6 +2462,10 @@ export const blogApi = {
   unpublishPost: (id) => 
     portalApi.post(`/blog/posts/${id}/unpublish`),
   
+  // Categories
+  getCategories: (projectId) =>
+    portalApi.get(`/blog/categories/${projectId}`),
+  
   // AI Generation
   createAI: (data) =>
     portalApi.post('/blog/ai/generate', data),

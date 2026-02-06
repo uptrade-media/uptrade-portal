@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { getSchemaMarkups, getEntityEnhancedSchema } from './api'
+import { getSchemaMarkups, getEntityEnhancedSchema, getSEOPageData } from './api'
 import type { ManagedSchemaProps } from './types'
 
 /**
@@ -78,11 +78,14 @@ export async function ManagedSchema({
   pageUrl,
   includeEntityGraph = false,
 }: EnhancedManagedSchemaProps): Promise<React.ReactElement | null> {
-  // Fetch managed schemas from Portal
+  // Fetch managed schemas from seo_schema_markup table (explicit schemas)
   const schemas = await getSchemaMarkups(projectId, path, {
     includeTypes,
     excludeTypes,
   })
+
+  // Fetch page data to get auto-generated managed_schema from Signal meta optimization
+  const pageData = await getSEOPageData(projectId, path)
 
   // Fetch entity-enhanced schemas if enabled
   let entitySchemas: object[] = []
@@ -90,10 +93,12 @@ export async function ManagedSchema({
     entitySchemas = await getEntityEnhancedSchema(projectId, path)
   }
 
-  // Combine all schemas: entity-enhanced + managed + additional
+  // Combine all schemas: entity-enhanced + managed + page-auto-generated + additional
   const allSchemas = [
     ...entitySchemas,
     ...schemas.map(s => s.schema_json),
+    // Include auto-generated schema from Signal meta optimization
+    ...(pageData?.managed_schema ? [pageData.managed_schema] : []),
     ...additionalSchemas,
   ]
 
@@ -134,6 +139,68 @@ export async function ManagedSchema({
       type="application/ld+json"
       dangerouslySetInnerHTML={{
         __html: JSON.stringify(finalSchema, null, 0),
+      }}
+    />
+  )
+}
+
+/**
+ * LLMSchema - Server Component that injects LLM-optimized structured data
+ * 
+ * This component renders AI-visibility optimized data that helps LLM crawlers
+ * (like ChatGPT, Claude, Perplexity) better understand page content.
+ * 
+ * The schema includes:
+ * - Detailed description (100-200 words for context)
+ * - Keywords and topics
+ * - Target audience
+ * - Content relationships
+ * 
+ * @example
+ * ```tsx
+ * import { LLMSchema } from '@uptrade/seo'
+ * 
+ * export default async function ServicePage({ params }) {
+ *   return (
+ *     <>
+ *       <LLMSchema 
+ *         projectId={process.env.UPTRADE_PROJECT_ID!}
+ *         path={`/services/${params.slug}`}
+ *       />
+ *       <main>...</main>
+ *     </>
+ *   )
+ * }
+ * ```
+ */
+export async function LLMSchema({
+  projectId,
+  path,
+}: {
+  projectId: string
+  path: string
+}): Promise<React.ReactElement | null> {
+  const pageData = await getSEOPageData(projectId, path)
+  
+  if (!pageData?.managed_llm_schema) {
+    return null
+  }
+
+  // Render as a special JSON-LD type that LLM crawlers can parse
+  const llmSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    ...pageData.managed_llm_schema,
+    // Add AI-specific metadata hints
+    additionalType: 'https://uptrade.ai/ns/LLMOptimizedContent',
+  }
+
+  return (
+    <script
+      type="application/ld+json"
+      data-llm-optimized="true"
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify(llmSchema, null, 0),
       }}
     />
   )

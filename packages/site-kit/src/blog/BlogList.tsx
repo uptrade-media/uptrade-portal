@@ -3,10 +3,88 @@
  * 
  * Fetches and displays a list of blog posts with pagination, filtering, and sorting.
  * Supports both server-side and client-side rendering.
+ * 
+ * @example Tailwind styling
+ * ```tsx
+ * <BlogList
+ *   styles={{
+ *     container: 'max-w-7xl mx-auto px-4',
+ *     categoryNav: 'flex flex-wrap gap-2 mb-8',
+ *     categoryLink: 'px-4 py-2 rounded-full text-sm font-medium',
+ *     categoryLinkActive: 'bg-primary-600 text-white',
+ *     categoryLinkInactive: 'bg-gray-100 text-gray-700 hover:bg-gray-200',
+ *     grid: 'grid md:grid-cols-2 lg:grid-cols-3 gap-8',
+ *     card: 'bg-white rounded-xl shadow-sm hover:shadow-lg transition-shadow',
+ *     cardImage: 'w-full h-48 object-cover',
+ *     cardBody: 'p-6',
+ *     cardTitle: 'text-xl font-bold text-gray-900',
+ *     cardExcerpt: 'text-gray-600 line-clamp-3',
+ *     cardMeta: 'text-sm text-gray-500',
+ *     pagination: 'flex justify-center gap-4 mt-12',
+ *     paginationLink: 'px-6 py-3 bg-primary-600 text-white rounded-lg',
+ *     emptyState: 'text-center py-12 text-gray-500',
+ *   }}
+ * />
+ * ```
  */
 
 import React from 'react'
 import type { BlogListResult, BlogPost, BlogCategory } from './types'
+
+// ============================================================================
+// STYLE TYPES
+// ============================================================================
+
+export interface BlogListStyles {
+  /** Container wrapper */
+  container?: string
+  /** Category navigation wrapper */
+  categoryNav?: string
+  /** Individual category link */
+  categoryLink?: string
+  /** Active category link (combined with categoryLink) */
+  categoryLinkActive?: string
+  /** Inactive category link (combined with categoryLink) */
+  categoryLinkInactive?: string
+  /** Posts grid container */
+  grid?: string
+  /** Individual post card */
+  card?: string
+  /** Card image wrapper */
+  cardImageWrapper?: string
+  /** Card image */
+  cardImage?: string
+  /** Card body/content area */
+  cardBody?: string
+  /** Card meta row (date, category) */
+  cardMeta?: string
+  /** Card category badge */
+  cardCategory?: string
+  /** Card date */
+  cardDate?: string
+  /** Card title */
+  cardTitle?: string
+  /** Card title link */
+  cardTitleLink?: string
+  /** Card excerpt */
+  cardExcerpt?: string
+  /** Card footer */
+  cardFooter?: string
+  /** Card author */
+  cardAuthor?: string
+  /** Card reading time */
+  cardReadingTime?: string
+  /** Card read more link */
+  cardReadMore?: string
+  /** Pagination container */
+  pagination?: string
+  /** Pagination link */
+  paginationLink?: string
+  /** Pagination info text */
+  paginationInfo?: string
+  /** Empty state */
+  emptyState?: string
+}
 
 // ============================================================================
 // DATA FETCHING
@@ -152,10 +230,17 @@ export interface BlogListServerProps {
   showCategoryFilter?: boolean
   /** Show pagination */
   showPagination?: boolean
-  /** Custom class name */
+  /** Custom class name (applied to container) */
   className?: string
   /** Base URL for post links */
   basePath?: string
+  /** 
+   * Custom Tailwind/CSS classes for each element.
+   * When provided, inline styles are disabled for that element.
+   */
+  styles?: BlogListStyles
+  /** Use CSS classes only (no inline styles) - set to true for Tailwind sites */
+  unstyled?: boolean
   /** Custom render function for post card */
   renderPost?: (post: BlogPost) => React.ReactNode
   /** Custom render function for entire grid */
@@ -182,6 +267,8 @@ export async function BlogList({
   showPagination = true,
   className,
   basePath = '/blog',
+  styles = {},
+  unstyled = false,
   renderPost,
   children,
 }: BlogListServerProps) {
@@ -189,6 +276,10 @@ export async function BlogList({
     console.warn('[Blog] No API key configured')
     return null
   }
+
+  // Helper to conditionally apply inline styles
+  const inlineStyle = (defaultStyle: React.CSSProperties, classKey: keyof BlogListStyles) =>
+    unstyled || styles[classKey] ? undefined : defaultStyle
 
   // Fetch data in parallel
   const [blogData, categories] = await Promise.all([
@@ -217,27 +308,34 @@ export async function BlogList({
 
   if (posts.length === 0) {
     return (
-      <div className={className} style={{ textAlign: 'center', padding: 40 }}>
-        <p style={{ color: '#6b7280' }}>No posts found.</p>
+      <div 
+        className={`${styles.container || ''} ${styles.emptyState || ''} ${className || ''}`.trim() || undefined}
+        style={inlineStyle({ textAlign: 'center', padding: 40 }, 'emptyState')}
+      >
+        <p style={inlineStyle({ color: '#6b7280' }, 'emptyState')}>No posts found.</p>
       </div>
     )
   }
 
   return (
-    <div className={className}>
+    <div className={`${styles.container || ''} ${className || ''}`.trim() || undefined}>
       {/* Category Filter */}
       {showCategoryFilter && categories.length > 0 && (
-        <nav style={{ marginBottom: 24, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <nav 
+          className={styles.categoryNav}
+          style={inlineStyle({ marginBottom: 24, display: 'flex', gap: 8, flexWrap: 'wrap' }, 'categoryNav')}
+        >
           <a
             href={basePath}
-            style={{
+            className={`${styles.categoryLink || ''} ${!category ? styles.categoryLinkActive || '' : styles.categoryLinkInactive || ''}`.trim() || undefined}
+            style={inlineStyle({
               padding: '6px 12px',
               borderRadius: 9999,
               fontSize: 14,
               textDecoration: 'none',
               backgroundColor: !category ? '#3b82f6' : '#f3f4f6',
               color: !category ? '#fff' : '#374151',
-            }}
+            }, 'categoryLink')}
           >
             All
           </a>
@@ -245,14 +343,15 @@ export async function BlogList({
             <a
               key={cat.slug}
               href={`${basePath}?category=${cat.slug}`}
-              style={{
+              className={`${styles.categoryLink || ''} ${category === cat.slug ? styles.categoryLinkActive || '' : styles.categoryLinkInactive || ''}`.trim() || undefined}
+              style={inlineStyle({
                 padding: '6px 12px',
                 borderRadius: 9999,
                 fontSize: 14,
                 textDecoration: 'none',
                 backgroundColor: category === cat.slug ? '#3b82f6' : '#f3f4f6',
                 color: category === cat.slug ? '#fff' : '#374151',
-              }}
+              }, 'categoryLink')}
             >
               {cat.name} ({cat.post_count})
             </a>
@@ -262,17 +361,18 @@ export async function BlogList({
 
       {/* Blog Grid */}
       <div
-        style={{
+        className={styles.grid}
+        style={inlineStyle({
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
           gap: 24,
-        }}
+        }, 'grid')}
       >
         {posts.map((post) =>
           renderPost ? (
             <React.Fragment key={post.id}>{renderPost(post)}</React.Fragment>
           ) : (
-            <BlogPostCard key={post.id} post={post} basePath={basePath} />
+            <BlogPostCard key={post.id} post={post} basePath={basePath} styles={styles} unstyled={unstyled} />
           )
         )}
       </div>
@@ -280,30 +380,36 @@ export async function BlogList({
       {/* Pagination */}
       {showPagination && pagination.totalPages > 1 && (
         <nav
-          style={{
+          className={styles.pagination}
+          style={inlineStyle({
             marginTop: 40,
             display: 'flex',
             justifyContent: 'center',
             gap: 8,
-          }}
+          }, 'pagination')}
         >
           {pagination.hasPrev && (
             <a
               href={buildPaginationUrl(basePath, page - 1, category)}
-              style={paginationLinkStyle}
+              className={styles.paginationLink}
+              style={inlineStyle(paginationLinkStyle, 'paginationLink')}
             >
               ← Previous
             </a>
           )}
           
-          <span style={{ padding: '8px 16px', color: '#6b7280' }}>
+          <span 
+            className={styles.paginationInfo}
+            style={inlineStyle({ padding: '8px 16px', color: '#6b7280' }, 'paginationInfo')}
+          >
             Page {pagination.page} of {pagination.totalPages}
           </span>
           
           {pagination.hasNext && (
             <a
               href={buildPaginationUrl(basePath, page + 1, category)}
-              style={paginationLinkStyle}
+              className={styles.paginationLink}
+              style={inlineStyle(paginationLinkStyle, 'paginationLink')}
             >
               Next →
             </a>
@@ -321,9 +427,11 @@ export async function BlogList({
 interface BlogPostCardProps {
   post: BlogPost
   basePath: string
+  styles?: BlogListStyles
+  unstyled?: boolean
 }
 
-function BlogPostCard({ post, basePath }: BlogPostCardProps) {
+function BlogPostCard({ post, basePath, styles = {}, unstyled = false }: BlogPostCardProps) {
   const date = post.published_at
     ? new Date(post.published_at).toLocaleDateString('en-US', {
         month: 'long',
@@ -332,36 +440,49 @@ function BlogPostCard({ post, basePath }: BlogPostCardProps) {
       })
     : null
 
+  // Helper to conditionally apply inline styles
+  const inlineStyle = (defaultStyle: React.CSSProperties, classKey: keyof BlogListStyles) =>
+    unstyled || styles[classKey] ? undefined : defaultStyle
+
   return (
     <article
-      style={{
+      className={styles.card}
+      style={inlineStyle({
         backgroundColor: '#fff',
         borderRadius: 12,
         overflow: 'hidden',
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         transition: 'box-shadow 0.2s, transform 0.2s',
-      }}
+      }, 'card')}
     >
       {post.featured_image && (
-        <a href={`${basePath}/${post.slug}`}>
+        <a href={`${basePath}/${post.slug}`} className={styles.cardImageWrapper}>
           <img
             src={post.featured_image}
             alt={post.featured_image_alt || post.title}
-            style={{
+            className={styles.cardImage}
+            style={inlineStyle({
               width: '100%',
               height: 200,
               objectFit: 'cover',
-            }}
+            }, 'cardImage')}
           />
         </a>
       )}
       
-      <div style={{ padding: 20 }}>
+      <div 
+        className={styles.cardBody}
+        style={inlineStyle({ padding: 20 }, 'cardBody')}
+      >
         {/* Meta */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <div 
+          className={styles.cardMeta}
+          style={inlineStyle({ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }, 'cardMeta')}
+        >
           {post.category && (
             <span
-              style={{
+              className={styles.cardCategory}
+              style={inlineStyle({
                 padding: '2px 8px',
                 borderRadius: 4,
                 fontSize: 12,
@@ -369,21 +490,30 @@ function BlogPostCard({ post, basePath }: BlogPostCardProps) {
                 backgroundColor: '#eff6ff',
                 color: '#3b82f6',
                 textTransform: 'uppercase',
-              }}
+              }, 'cardCategory')}
             >
               {typeof post.category === 'string' ? post.category : post.category?.name || 'Uncategorized'}
             </span>
           )}
           {date && (
-            <span style={{ fontSize: 13, color: '#6b7280' }}>{date}</span>
+            <span 
+              className={styles.cardDate}
+              style={inlineStyle({ fontSize: 13, color: '#6b7280' }, 'cardDate')}
+            >
+              {date}
+            </span>
           )}
         </div>
 
         {/* Title */}
-        <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 600, lineHeight: 1.4 }}>
+        <h3 
+          className={styles.cardTitle}
+          style={inlineStyle({ margin: '0 0 8px', fontSize: 18, fontWeight: 600, lineHeight: 1.4 }, 'cardTitle')}
+        >
           <a
             href={`${basePath}/${post.slug}`}
-            style={{ color: 'inherit', textDecoration: 'none' }}
+            className={styles.cardTitleLink}
+            style={inlineStyle({ color: 'inherit', textDecoration: 'none' }, 'cardTitleLink')}
           >
             {post.title}
           </a>
@@ -392,7 +522,8 @@ function BlogPostCard({ post, basePath }: BlogPostCardProps) {
         {/* Excerpt */}
         {post.excerpt && (
           <p
-            style={{
+            className={styles.cardExcerpt}
+            style={inlineStyle({
               margin: '0 0 16px',
               fontSize: 14,
               color: '#6b7280',
@@ -401,21 +532,30 @@ function BlogPostCard({ post, basePath }: BlogPostCardProps) {
               WebkitLineClamp: 3,
               WebkitBoxOrient: 'vertical',
               overflow: 'hidden',
-            }}
+            }, 'cardExcerpt')}
           >
             {post.excerpt}
           </p>
         )}
 
         {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div 
+          className={styles.cardFooter}
+          style={inlineStyle({ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }, 'cardFooter')}
+        >
           {post.author && (
-            <span style={{ fontSize: 13, color: '#6b7280' }}>
+            <span 
+              className={styles.cardAuthor}
+              style={inlineStyle({ fontSize: 13, color: '#6b7280' }, 'cardAuthor')}
+            >
               By {typeof post.author === 'string' ? post.author : post.author.name}
             </span>
           )}
           {post.reading_time_minutes && (
-            <span style={{ fontSize: 13, color: '#9ca3af' }}>
+            <span 
+              className={styles.cardReadingTime}
+              style={inlineStyle({ fontSize: 13, color: '#9ca3af' }, 'cardReadingTime')}
+            >
               {post.reading_time_minutes} min read
             </span>
           )}

@@ -21,7 +21,6 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { useSiteKit } from '../SiteKitProvider'
 
 export interface ManagedImageData {
   id: string
@@ -50,6 +49,10 @@ export interface ImageFile {
 }
 
 export interface ManagedImageProps {
+  /** API key for Portal API */
+  apiKey?: string
+  /** API URL (defaults to https://api.uptrademedia.com) */
+  apiUrl?: string
   /** Unique slot identifier (e.g., 'hero-background', 'about-team-1') */
   slotId: string
   /** Page path for page-specific slots (defaults to current path) */
@@ -92,6 +95,8 @@ const isDevMode = (): boolean => {
 }
 
 export function ManagedImage({
+  apiKey = process.env.NEXT_PUBLIC_UPTRADE_API_KEY,
+  apiUrl = process.env.NEXT_PUBLIC_UPTRADE_API_URL || 'https://api.uptrademedia.com',
   slotId,
   pagePath,
   alt,
@@ -107,7 +112,6 @@ export function ManagedImage({
   style,
   forceDevMode,
 }: ManagedImageProps) {
-  const context = useSiteKit()
   const [imageData, setImageData] = useState<ManagedImageData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -119,7 +123,7 @@ export function ManagedImage({
 
   // Fetch image data from Portal API
   const fetchImage = useCallback(async () => {
-    if (!context?.apiKey || !context?.apiUrl) {
+    if (!apiKey || !apiUrl) {
       setLoading(false)
       return
     }
@@ -127,11 +131,11 @@ export function ManagedImage({
     try {
       const params = new URLSearchParams({ page_path: currentPath })
       const res = await fetch(
-        `${context.apiUrl}/public/images/slot/${encodeURIComponent(slotId)}?${params}`,
+        `${apiUrl}/public/images/slot/${encodeURIComponent(slotId)}?${params}`,
         {
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': context.apiKey,
+            'x-api-key': apiKey,
           },
         }
       )
@@ -150,7 +154,7 @@ export function ManagedImage({
     } finally {
       setLoading(false)
     }
-  }, [context?.apiKey, context?.apiUrl, slotId, currentPath, onError])
+  }, [apiKey, apiUrl, slotId, currentPath, onError])
 
   useEffect(() => {
     fetchImage()
@@ -233,7 +237,7 @@ export function ManagedImage({
           <ImagePickerModal
             slotId={slotId}
             pagePath={currentPath}
-            config={context}
+            config={{ apiKey, apiUrl }}
             onClose={() => setShowPicker(false)}
             onSelect={() => {
               setShowPicker(false)
@@ -285,7 +289,7 @@ export function ManagedImage({
         <ImagePickerModal
           slotId={slotId}
           pagePath={currentPath}
-          config={context}
+          config={{ apiKey, apiUrl }}
           currentImage={imageData}
           onClose={() => setShowPicker(false)}
           onSelect={() => {

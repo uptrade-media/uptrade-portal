@@ -1298,7 +1298,7 @@ export const signalSeoApi = {
       categoryId: params.categoryId || params.category_id,
       publishImmediately: params.publishImmediately ?? false,
     }, {
-      timeout: options.timeout || 120000, // 2 minute timeout for full pipeline
+      timeout: options.timeout || 300000, // 5 minute timeout for full pipeline with citation fetching
     })
     return response.data.data || response.data
   },

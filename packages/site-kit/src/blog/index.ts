@@ -37,10 +37,10 @@
 
 // Components
 export { BlogPost } from './BlogPost'
-export type { BlogPostServerProps } from './BlogPost'
+export type { BlogPostServerProps, BlogPostStyles } from './BlogPost'
 
 export { BlogList } from './BlogList'
-export type { BlogListServerProps } from './BlogList'
+export type { BlogListServerProps, BlogListStyles } from './BlogList'
 
 export { BlogSidebar, NewsletterWidget } from './BlogSidebar'
 export type { BlogSidebarProps, NewsletterWidgetProps } from './BlogSidebar'

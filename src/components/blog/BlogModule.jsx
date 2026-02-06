@@ -6,7 +6,8 @@ import { useState, useEffect, useMemo } from 'react'
 import useAuthStore from '@/lib/auth-store'
 import { useBrandColors } from '@/hooks/useBrandColors'
 import { useSignalAccess } from '@/lib/signal-access'
-import { blogApi } from '@/lib/portal-api'
+import { blogApi, filesApi } from '@/lib/portal-api'
+import { skillsApi } from '@/lib/signal-api'
 import SignalIcon from '@/components/ui/SignalIcon'
 import { ModuleLayout } from '@/components/ModuleLayout'
 import { EmptyState } from '@/components/EmptyState'
@@ -1168,6 +1169,258 @@ function StatsOverview({ posts }) {
 }
 
 // ============================================================================
+// EDIT POST DIALOG
+// ============================================================================
+
+function EditPostDialog({ open, onOpenChange, post, onSave, onRegenerateImage, blogCategories = [] }) {
+  const [title, setTitle] = useState('')
+  const [excerpt, setExcerpt] = useState('')
+  const [category, setCategory] = useState('')
+  const [status, setStatus] = useState('draft')
+  const [content, setContent] = useState('')
+  const [featuredImage, setFeaturedImage] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false)
+
+  // Use project-specific categories from props, with fallback
+  const categoryOptions = blogCategories.length > 0 
+    ? blogCategories.map(cat => ({ value: cat.slug, label: cat.name }))
+    : [
+        { value: 'guides', label: 'Guides' },
+        { value: 'news', label: 'News' },
+        { value: 'tips', label: 'Tips' },
+      ]
+
+  // Helper to extract text from potentially JSON-formatted content
+  const extractTextContent = (value) => {
+    if (!value) return ''
+    if (typeof value !== 'string') {
+      // If it's already an object/array, try to extract content
+      if (Array.isArray(value)) {
+        return value.map(s => s.content || s).join('\n\n')
+      }
+      if (value.content) return value.content
+      return JSON.stringify(value, null, 2)
+    }
+    // Check if it's a JSON string
+    const trimmed = value.trim()
+    if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && (trimmed.endsWith('}') || trimmed.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) {
+          return parsed.map(s => s.content || s).join('\n\n')
+        }
+        if (parsed.content) return parsed.content
+        return value // Return original if structure not recognized
+      } catch {
+        return value // Not valid JSON, return as-is
+      }
+    }
+    return value
+  }
+
+  // Reset form when post changes
+  useEffect(() => {
+    if (post) {
+      setTitle(post.title || '')
+      setExcerpt(extractTextContent(post.excerpt) || '')
+      // Use the first available category as fallback if post has no category
+      const defaultCategory = categoryOptions[0]?.value || ''
+      setCategory(post.category || defaultCategory)
+      setStatus(post.status || 'draft')
+      setContent(extractTextContent(post.content) || '')
+      setFeaturedImage(post.featuredImage || '')
+    }
+  }, [post, categoryOptions])
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await onSave({
+        title,
+        excerpt,
+        category,
+        status,
+        content,
+        featuredImage: featuredImage || undefined,
+        ...(status === 'published' && !post?.publishedAt && { publishedAt: new Date().toISOString() })
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleRegenerateImage = async () => {
+    if (!onRegenerateImage) return
+    setIsGeneratingImage(true)
+    try {
+      // Pass the edited post data with current title/content
+      const imageUrl = await onRegenerateImage({
+        ...post,
+        title,
+        content,
+        excerpt
+      })
+      if (imageUrl) {
+        setFeaturedImage(imageUrl)
+      }
+    } catch (error) {
+      console.error('Failed to generate image:', error)
+    } finally {
+      setIsGeneratingImage(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit Blog Post</DialogTitle>
+          <DialogDescription>
+            Update your blog post details below.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* Featured Image */}
+          <div className="space-y-2">
+            <Label>Featured Image</Label>
+            <div className="flex items-start gap-4">
+              <div className="w-32 h-20 rounded-lg bg-[var(--glass-bg)] overflow-hidden flex-shrink-0 border border-[var(--glass-border)]">
+                {featuredImage ? (
+                  <img 
+                    src={featuredImage} 
+                    alt="Featured"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <ImageIcon className="h-6 w-6 text-[var(--text-tertiary)]" />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 space-y-2">
+                <Input
+                  value={featuredImage}
+                  onChange={(e) => setFeaturedImage(e.target.value)}
+                  placeholder="Image URL"
+                  className="text-sm"
+                />
+                {onRegenerateImage && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRegenerateImage}
+                    disabled={isGeneratingImage}
+                    className="gap-2"
+                  >
+                    {isGeneratingImage ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <SignalIcon className="h-4 w-4" />
+                        Generate with Signal
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Title */}
+          <div className="space-y-2">
+            <Label htmlFor="edit-title">Title</Label>
+            <Input
+              id="edit-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Post title"
+            />
+          </div>
+
+          {/* Excerpt */}
+          <div className="space-y-2">
+            <Label htmlFor="edit-excerpt">Excerpt / Meta Description</Label>
+            <Textarea
+              id="edit-excerpt"
+              value={excerpt}
+              onChange={(e) => setExcerpt(e.target.value)}
+              placeholder="Brief description for SEO and previews"
+              rows={3}
+            />
+            <p className="text-xs text-[var(--text-tertiary)]">
+              {excerpt?.length || 0}/160 characters (recommended)
+            </p>
+          </div>
+
+          {/* Category & Status Row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {categoryOptions.map(cat => (
+                    <SelectItem key={cat.value} value={cat.value}>
+                      {cat.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="published">Published</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="space-y-2">
+            <Label htmlFor="edit-content">Content (Markdown)</Label>
+            <Textarea
+              id="edit-content"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Blog post content in Markdown..."
+              rows={12}
+              className="font-mono text-sm"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSave}
+            disabled={isSaving || !title}
+            style={{ backgroundColor: 'var(--brand-primary)', color: 'white' }}
+          >
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================================
 // MAIN DASHBOARD COMPONENT
 // ============================================================================
 
@@ -1183,6 +1436,7 @@ export default function BlogDashboard() {
   const [posts, setPosts] = useState([])
   const [postsLoading, setPostsLoading] = useState(true)
   const [selectedPost, setSelectedPost] = useState(null)
+  const [blogCategories, setBlogCategories] = useState([])
 
   // UI State
   const [currentView, setCurrentView] = useState('all')
@@ -1193,16 +1447,29 @@ export default function BlogDashboard() {
   // Dialogs
   const [aiDialogOpen, setAiDialogOpen] = useState(false)
   const [prefillData, setPrefillData] = useState(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingPost, setEditingPost] = useState(null)
 
   // Sidebar sections open state
   const [postsOpen, setPostsOpen] = useState(true)
   const [signalBrainOpen, setSignalBrainOpen] = useState(false)
   const [seoToolsOpen, setSeoToolsOpen] = useState(false)
 
-  // Load posts
+  // Load posts and categories
   useEffect(() => {
     fetchPosts()
+    fetchCategories()
   }, [projectId])
+
+  const fetchCategories = async () => {
+    if (!projectId) return
+    try {
+      const response = await blogApi.getCategories(projectId)
+      setBlogCategories(response.data || [])
+    } catch (error) {
+      console.error('Failed to fetch categories:', error)
+    }
+  }
 
   const fetchPosts = async () => {
     setPostsLoading(true)
@@ -1256,6 +1523,100 @@ export default function BlogDashboard() {
       setPosts(prev => prev.map(p => p.id === id ? { ...p, featured } : p))
     } catch (error) {
       toast.error('Failed to update')
+    }
+  }
+
+  const handleEdit = (post) => {
+    setEditingPost(post)
+    setEditDialogOpen(true)
+  }
+
+  const handleSaveEdit = async (updates) => {
+    if (!editingPost) return
+    try {
+      await blogApi.updatePost(editingPost.id, updates)
+      toast.success('Post updated!')
+      setEditDialogOpen(false)
+      // Note: fetchPosts() and setEditingPost(null) happen in onOpenChange
+    } catch (error) {
+      console.error('Failed to update post:', error)
+      toast.error('Failed to update post')
+    }
+  }
+
+  const handleRegenerateImage = async (post) => {
+    try {
+      const result = await skillsApi.invoke('content', 'generate_blog_image', {
+        params: {
+          title: post.title,
+          topic: post.title, // Use title as topic
+          category: post.category,
+          content: post.content,
+          excerpt: post.excerpt,
+          style: 'photorealistic',
+          aspectRatio: '16:9'
+        },
+        context: {
+          project_id: projectId,
+          org_id: currentOrg?.id
+        }
+      })
+
+      // Signal wraps tool results: { result: { success, imageUrl, ... }, durationMs, skill, tool }
+      const imageResult = result?.result || result
+      if (imageResult?.success && imageResult?.imageUrl) {
+        // Update post with new image and alt text
+        const updateData = { 
+          featuredImage: imageResult.imageUrl,
+          ...(imageResult.altText && { featuredImageAlt: imageResult.altText })
+        }
+        await blogApi.updatePost(post.id, updateData)
+        
+        // Register file in Files module so it appears in the file browser
+        // Extract storage path from URL: https://...supabase.co/storage/v1/object/public/files/{projectId}/Blog/Featured/{filename}
+        try {
+          const urlParts = new URL(imageResult.imageUrl)
+          const pathMatch = urlParts.pathname.match(/\/files\/(.+)$/)
+          if (pathMatch) {
+            const storagePath = pathMatch[1]
+            const filename = imageResult.filename || storagePath.split('/').pop()
+            await filesApi.registerFile({
+              fileId: crypto.randomUUID(),
+              filename,
+              mimeType: imageResult.mimeType || 'image/png',
+              fileSize: 0, // Size unknown from URL
+              storagePath,
+              publicUrl: imageResult.imageUrl,
+              projectId,
+              folderPath: 'Blog/Featured',
+              category: 'content',
+              isPublic: true
+            })
+          }
+        } catch (regError) {
+          console.warn('Failed to register file in Files module:', regError)
+          // Non-fatal - image still saved to storage and blog post
+        }
+        
+        // Update editingPost so the dialog shows the new image immediately
+        if (editingPost && editingPost.id === post.id) {
+          setEditingPost(prev => ({
+            ...prev,
+            featuredImage: imageResult.imageUrl,
+            featuredImageAlt: imageResult.altText || prev?.featuredImageAlt
+          }))
+        }
+        
+        toast.success('New image generated!')
+        // Don't fetchPosts() here - it will happen when dialog closes
+        return imageResult.imageUrl
+      } else {
+        throw new Error(imageResult?.error || 'Image generation failed')
+      }
+    } catch (error) {
+      console.error('Failed to regenerate image:', error)
+      toast.error('Failed to generate image')
+      throw error
     }
   }
 
@@ -1360,7 +1721,7 @@ export default function BlogDashboard() {
         <StatsOverview posts={posts} />
 
         {/* Posts List */}
-        <Card className="bg-[var(--glass-bg)] border-[var(--glass-border)]">
+        <Card className="bg-[var(--glass-bg)] border-[var(--glass-border)] py-0 gap-0">
           {postsLoading ? (
             <div className="p-4 space-y-4">
               {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-20 w-full" />)}
@@ -1373,6 +1734,7 @@ export default function BlogDashboard() {
                   post={post}
                   isSelected={selectedPost?.id === post.id}
                   onClick={() => setSelectedPost(post)}
+                  onEdit={handleEdit}
                   onPublish={handlePublish}
                   onDelete={handleDelete}
                   onToggleFeatured={handleToggleFeatured}
@@ -1435,6 +1797,21 @@ export default function BlogDashboard() {
           }}
         />
       )}
+      <EditPostDialog
+        open={editDialogOpen}
+        onOpenChange={(open) => {
+          setEditDialogOpen(open)
+          if (!open) {
+            // Refresh posts when dialog closes to pick up any regenerated images
+            fetchPosts()
+            setEditingPost(null)
+          }
+        }}
+        post={editingPost}
+        onSave={handleSaveEdit}
+        onRegenerateImage={hasSignalAccess ? handleRegenerateImage : undefined}
+        blogCategories={blogCategories}
+      />
       <Button
         size="sm"
         className="h-8 gap-1.5"

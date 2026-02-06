@@ -4,23 +4,47 @@
  * Unified package for all Uptrade client-side integrations.
  * All API calls go through Portal API with API key auth - never Supabase directly.
  * 
+ * **Recommended: Server-First Architecture**
+ * 
+ * Most Site-Kit components are server components and work without a provider:
+ * 
  * @example
  * ```tsx
- * import { SiteKitProvider } from '@uptrade/site-kit'
+ * // Server components (SEO, Images, Blog) - no provider needed
+ * import { ManagedFavicon } from '@uptrade/site-kit/images'
+ * import { ManagedMetadata } from '@uptrade/site-kit/seo'
  * 
  * export default function RootLayout({ children }) {
  *   return (
- *     <SiteKitProvider
- *       apiUrl="https://api.uptrademedia.com"
- *       apiKey={process.env.NEXT_PUBLIC_UPTRADE_API_KEY}
- *       analytics={{ enabled: true }}
- *       engage={{ enabled: true }}
- *     >
- *       {children}
- *     </SiteKitProvider>
+ *     <html>
+ *       <head>
+ *         <ManagedFavicon />
+ *       </head>
+ *       <body>{children}</body>
+ *     </html>
  *   )
  * }
  * ```
+ * 
+ * **For client-side modules** (Analytics, Engage), use individual providers:
+ * 
+ * @example
+ * ```tsx
+ * import { AnalyticsProvider } from '@uptrade/site-kit/analytics'
+ * 
+ * export default function ClientLayout({ children }) {
+ *   return (
+ *     <AnalyticsProvider
+ *       apiKey={process.env.NEXT_PUBLIC_UPTRADE_API_KEY}
+ *       apiUrl={process.env.NEXT_PUBLIC_UPTRADE_API_URL}
+ *     >
+ *       {children}
+ *     </AnalyticsProvider>
+ *   )
+ * }
+ * ```
+ * 
+ * **SiteKitProvider is deprecated** - use individual components/providers instead.
  */
 
 // Main Provider

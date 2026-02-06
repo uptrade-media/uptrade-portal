@@ -211,6 +211,9 @@ export const getSitemapEntries = cache(async (
  * Register/sync sitemap entries from the client site
  * Call this at build time to populate seo_pages from your sitemap.xml
  * 
+ * After registration, Signal AI will automatically generate optimized
+ * meta titles and descriptions for pages that don't have them yet.
+ * 
  * @example
  * ```ts
  * // scripts/register-sitemap.ts (run at build time)
@@ -219,7 +222,7 @@ export const getSitemapEntries = cache(async (
  * await registerSitemap([
  *   { path: '/', priority: 1.0, changefreq: 'daily' },
  *   { path: '/about', priority: 0.8, changefreq: 'weekly' },
- * ])
+ * ], { optimize_meta: true })
  * ```
  */
 export async function registerSitemap(
@@ -228,8 +231,21 @@ export async function registerSitemap(
     title?: string
     priority?: number
     changefreq?: 'always' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'never'
-  }>
-): Promise<{ success: boolean; created: number; updated: number }> {
+  }>,
+  options?: {
+    /** Trigger Signal AI to generate optimized meta titles/descriptions (default: true) */
+    optimize_meta?: boolean
+  }
+): Promise<{ 
+  success: boolean
+  created: number
+  updated: number
+  removed?: number
+  meta_optimization?: {
+    triggered: boolean
+    pages_queued: number
+  } | null
+}> {
   const { apiUrl, apiKey } = getApiConfig()
   
   if (!apiKey) {
@@ -244,7 +260,10 @@ export async function registerSitemap(
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
       },
-      body: JSON.stringify({ entries }),
+      body: JSON.stringify({ 
+        entries,
+        optimize_meta: options?.optimize_meta !== false, // Default to true
+      }),
     })
     
     if (!response.ok) {

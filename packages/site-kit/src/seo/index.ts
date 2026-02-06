@@ -85,7 +85,7 @@ export {
 // ============================================
 // React Server Components
 // ============================================
-export { ManagedSchema, createSchema, createBreadcrumbSchema } from './ManagedSchema'
+export { ManagedSchema, LLMSchema, createSchema, createBreadcrumbSchema } from './ManagedSchema'
 export { ManagedFAQ } from './ManagedFAQ'
 export { ManagedInternalLinks } from './ManagedInternalLinks'
 export { ManagedContent, getManagedContentData } from './ManagedContent'

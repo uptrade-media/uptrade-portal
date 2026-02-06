@@ -5,7 +5,7 @@
       "command": "node",
       "args": ["/Volumes/Uptrade Media/GitHub/Portal/supabase-mcp-server/dist/index.js"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres.mwcjtnoqxolplwpkxnfe:KrKE9CSt4XBIGXiy@aws-1-us-east-2.pooler.supabase.com:6543/postgres"
+        "DATABASE_URL": "postgresql://postgres.mwcjtnoqxolplwpkxnfe:tE1OG6IdEwTpuX96@aws-1-us-east-2.pooler.supabase.com:6543/postgres"
       }
     }
   }

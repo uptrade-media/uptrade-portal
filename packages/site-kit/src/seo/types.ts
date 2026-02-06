@@ -23,6 +23,11 @@ export interface SEOPageData {
   managed_canonical?: string
   managed_robots?: string
   managed_keywords?: string[]
+  managed_h1?: string
+  /** Auto-generated schema.org markup from Signal meta optimization */
+  managed_schema?: Record<string, unknown>
+  /** LLM-optimized schema for AI visibility (detailed descriptions, keywords, etc.) */
+  managed_llm_schema?: Record<string, unknown>
   updated_at: string
 }
 

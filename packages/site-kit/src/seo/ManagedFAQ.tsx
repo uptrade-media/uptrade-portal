@@ -20,6 +20,11 @@ function DefaultFAQItem({ item, index }: { item: FAQItem; index: number }) {
 
 /**
  * Generate FAQ schema from items
+ * 
+ * IMPORTANT: This is the ONLY place FAQ schema (FAQPage) is generated.
+ * The CLI setup command does NOT generate FAQ schema - it only extracts/uploads
+ * FAQ data to the Portal. This component then dynamically generates the schema
+ * from that data, ensuring FAQ changes in Portal automatically update the schema.
  */
 function generateFAQSchema(items: FAQItem[]): Record<string, unknown> {
   return createSchema('FAQPage', {

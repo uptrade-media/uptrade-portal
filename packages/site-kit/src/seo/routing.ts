@@ -162,6 +162,9 @@ export async function generateSitemap(
  * Call this at build time to sync your local routes to seo_pages.
  * This ensures analytics only tracks real pages.
  * 
+ * After registration, Signal AI will generate optimized meta titles
+ * and descriptions for pages that don't have managed meta yet.
+ * 
  * @example
  * ```ts
  * // scripts/register-sitemap.ts
@@ -177,6 +180,9 @@ export async function generateSitemap(
  * 
  * // Option 2: Auto-discover from Next.js app directory
  * await registerLocalSitemap({ autoDiscover: true })
+ * 
+ * // Option 3: Skip Signal AI meta optimization
+ * await registerLocalSitemap({ autoDiscover: true, optimize_meta: false })
  * ```
  */
 export async function registerLocalSitemap(options: {
@@ -187,7 +193,18 @@ export async function registerLocalSitemap(options: {
     changefreq?: 'always' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'never'
   }>
   autoDiscover?: boolean
-}): Promise<{ success: boolean; created: number; updated: number }> {
+  /** Trigger Signal AI to generate optimized meta titles/descriptions (default: true) */
+  optimize_meta?: boolean
+}): Promise<{ 
+  success: boolean
+  created: number
+  updated: number
+  removed?: number
+  meta_optimization?: {
+    triggered: boolean
+    pages_queued: number
+  } | null
+}> {
   const { registerSitemap } = await import('./api')
   
   let entries = options.entries || []
@@ -214,7 +231,9 @@ export async function registerLocalSitemap(options: {
   }
   
   console.log(`[Uptrade] Registering ${entries.length} sitemap entries...`)
-  const result = await registerSitemap(entries)
+  const result = await registerSitemap(entries, { 
+    optimize_meta: options.optimize_meta !== false, // Default to true
+  })
   
   if (result.success) {
     console.log(`[Uptrade] Sitemap registered: ${result.created} new, ${result.updated} updated`)

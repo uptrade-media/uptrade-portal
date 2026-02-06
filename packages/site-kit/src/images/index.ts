@@ -12,6 +12,9 @@ export type {
   ImageFile 
 } from './ManagedImage'
 
+export { ManagedFavicon } from './ManagedFavicon'
+export type { ManagedFaviconProps } from './ManagedFavicon'
+
 // API functions for programmatic use
 export { 
   fetchManagedImage,

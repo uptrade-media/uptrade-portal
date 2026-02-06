@@ -1,24 +1,34 @@
 /**
  * @uptrade/site-kit - SiteKitProvider
  * 
- * Unified provider component that initializes all enabled modules.
+ * @deprecated SiteKitProvider forces all components to be client-side, breaking Next.js server components.
+ * Use individual components/providers instead:
  * 
- * IMPORTANT: Client sites ONLY need to provide an API key.
- * - apiKey: Required - identifies project and provides access
- * - apiUrl: Optional - defaults to https://api.uptrademedia.com
+ * - Server components (SEO, Images, Blog): Import directly, no provider needed
+ * - Client components (Analytics, Engage): Use AnalyticsProvider, EngageWidget directly
  * 
- * All API calls go through Portal API with API key auth - never Supabase directly.
- * The API key identifies the project, so no project_id is needed.
+ * **Why deprecated:**
+ * - Forces client-side rendering for all children (breaks server components)
+ * - Uses React Context which doesn't work in server components
+ * - Most Site-Kit components should be server components for better performance
  * 
- * Example minimal setup:
+ * **Migration:**
  * ```tsx
- * <SiteKitProvider
- *   apiKey={process.env.NEXT_PUBLIC_UPTRADE_API_KEY}
- *   analytics={{ enabled: true }}
- *   engage={{ enabled: true }}
- *   forms={{ enabled: true }}
- * >
+ * // ❌ OLD (client-only):
+ * <SiteKitProvider apiKey="..." analytics={{ enabled: true }}>
+ *   <ManagedFavicon />
+ * </SiteKitProvider>
+ * 
+ * // ✅ NEW (server-first):
+ * <ManagedFavicon /> // Already has env defaults, no provider needed
+ * 
+ * // For Analytics (client component):
+ * <AnalyticsProvider apiKey={process.env.NEXT_PUBLIC_UPTRADE_API_KEY}>
+ *   {children}
+ * </AnalyticsProvider>
  * ```
+ * 
+ * Legacy provider - use only for backwards compatibility.
  */
 
 'use client'
