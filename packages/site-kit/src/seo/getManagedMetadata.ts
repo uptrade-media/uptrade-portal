@@ -31,22 +31,42 @@ export async function getManagedMetadata(
 ): Promise<ManagedMetadataResult> {
   const { projectId, path, fallback = {}, overrides = {} } = options
 
-  const pageData = await getSEOPageData(projectId, path)
+  const result = await getSEOPageData(projectId, path)
+  const pageData = result?.page
+  const projectData = result?.project
 
-  // If no managed data, return fallback
+  // If no managed data, return fallback (still include favicon from project if available)
   if (!pageData) {
-    return {
+    const fallbackMeta: ManagedMetadataResult = {
       ...fallback,
       ...overrides,
       _managed: false,
       _source: 'fallback',
     } as ManagedMetadataResult
+
+    // Add favicon from project logo_url even for fallback
+    if (projectData?.logo_url) {
+      fallbackMeta.icons = {
+        icon: projectData.logo_url,
+        apple: projectData.logo_url,
+      }
+    }
+
+    return fallbackMeta
   }
 
   // Build metadata from managed values, falling back to provided fallbacks
   const metadata: ManagedMetadataResult = {
     _managed: true,
     _source: 'database',
+  }
+
+  // Favicon from project logo
+  if (projectData?.logo_url) {
+    metadata.icons = {
+      icon: projectData.logo_url,
+      apple: projectData.logo_url,
+    }
   }
 
   // Title

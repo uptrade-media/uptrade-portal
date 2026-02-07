@@ -664,13 +664,11 @@ export function EmailEditor({
   const isUptradeMedia = currentOrg?.slug === 'uptrade-media' || 
                          currentOrg?.domain === 'uptrademedia.com' || 
                          currentOrg?.org_type === 'agency'
-  const {
-    uploadFile: uploadEmailAsset,
-    fetchFiles: fetchProjectFiles,
-    files: projectFiles,
-    isLoading: filesLoading,
-    uploadProgress,
-  } = useFilesStore()
+  const projectId = currentProject?.id
+  const { data: filesData, isLoading: filesLoading } = useFiles(projectId, { category: 'email' })
+  const projectFiles = filesData?.files || []
+  const uploadFileMutation = useUploadFile()
+  const uploadProgress = uploadFileMutation.isPending ? 50 : 0
   
   // Background state
   const [backgroundMode, setBackgroundMode] = useState('color') // 'color' | 'gradient' | 'image'
@@ -1987,19 +1985,18 @@ export function EmailEditor({
     }
 
     setIsUploadingImage(true)
-    const result = await uploadEmailAsset(currentProject.id, file, 'email', true)
-    setIsUploadingImage(false)
-
-    if (result?.success) {
-      const uploadedUrl = result.data?.file?.url || result.data?.url
+    try {
+      const result = await uploadFileMutation.mutateAsync({ projectId: currentProject.id, file, category: 'email', isPublic: true })
+      const uploadedUrl = result?.url || result?.public_url || result?.publicUrl
       if (uploadedUrl) {
         setImageUrl(uploadedUrl)
         applyImageAttributes(uploadedUrl, imageAlt || file.name)
       }
-      await fetchProjectFiles(currentProject.id, { category: 'email' })
       toast.success('Image uploaded')
-    } else if (result?.error) {
-      toast.error(result.error)
+    } catch (err) {
+      toast.error(err.message || 'Upload failed')
+    } finally {
+      setIsUploadingImage(false)
     }
   }
 
@@ -2046,7 +2043,7 @@ export function EmailEditor({
       toast.error('Select a project to browse images')
       return
     }
-    await fetchProjectFiles(currentProject.id, { category: 'email', folderPath: 'emails' })
+    queryClient.invalidateQueries({ queryKey: filesKeys.list(currentProject.id, {}) })
     setShowImageLibraryModal(true)
   }
 
@@ -2056,21 +2053,20 @@ export function EmailEditor({
       toast.error('Select a project to upload images')
       return
     }
-    const result = await uploadEmailAsset(
-      currentProject.id, 
-      file, 
-      'email', // category
-      true, // isPublic - email images need to be public for recipients
-      'emails' // folderPath - upload to emails folder
-    )
-    if (result.success) {
+    try {
+      const result = await uploadFileMutation.mutateAsync({ 
+        projectId: currentProject.id, 
+        file, 
+        category: 'email', 
+        isPublic: true,
+        folderPath: 'emails'
+      })
       toast.success('Image uploaded!')
-      // Refresh the file list
-      await fetchProjectFiles(currentProject.id, { category: 'email', folderPath: 'emails' })
-    } else if (result.error) {
-      toast.error(result.error)
+      return { success: true, data: result }
+    } catch (err) {
+      toast.error(err.message || 'Upload failed')
+      return { success: false, error: err.message }
     }
-    return result
   }
 
   // Template gallery handler

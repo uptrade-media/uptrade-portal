@@ -19,7 +19,10 @@ import {
   Shield,
   Briefcase,
   Search,
-  UserCheck
+  UserCheck,
+  Building2,
+  FolderOpen,
+  Info
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -60,6 +63,8 @@ import {
 import { toast } from '@/lib/toast'
 import { useOrgMembers, useInviteOrgMember, useRemoveOrgMember, useUpdateOrgMemberRole } from '@/lib/hooks'
 import { adminApi } from '@/lib/portal-api'
+import useAuthStore from '@/lib/auth-store'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 // Role icons and labels
 const ROLE_CONFIG = {
@@ -84,7 +89,10 @@ export default function OrganizationUsersPanel({
   const [showMemberDetails, setShowMemberDetails] = useState(false)
   const [selectedMember, setSelectedMember] = useState(null)
   const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteName, setInviteName] = useState('')
   const [inviteRole, setInviteRole] = useState('member')
+  const [inviteAccessLevel, setInviteAccessLevel] = useState('organization')
+  const [inviteProjectIds, setInviteProjectIds] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   
   // For adding existing users
@@ -93,7 +101,12 @@ export default function OrganizationUsersPanel({
   const [isSearching, setIsSearching] = useState(false)
   const [selectedUser, setSelectedUser] = useState(null)
   const [addUserRole, setAddUserRole] = useState('member')
+  const [addUserAccessLevel, setAddUserAccessLevel] = useState('organization')
+  const [addUserProjectIds, setAddUserProjectIds] = useState([])
   const [activeTab, setActiveTab] = useState('invite')
+  
+  // Get org projects from auth store
+  const availableProjects = useAuthStore(s => s.availableProjects) || []
 
   // React Query hooks
   const { data: membersData, isLoading } = useOrgMembers(organizationId)
@@ -149,16 +162,27 @@ export default function OrganizationUsersPanel({
       return
     }
     
+    if (inviteAccessLevel === 'project' && inviteProjectIds.length === 0) {
+      toast.error('Please select at least one project')
+      return
+    }
+    
     setIsSubmitting(true)
     try {
       await inviteMemberMutation.mutateAsync({
         organizationId,
         email: inviteEmail.trim(),
+        name: inviteName.trim() || inviteEmail.split('@')[0],
         role: inviteRole,
+        accessLevel: inviteAccessLevel,
+        projectIds: inviteAccessLevel === 'project' ? inviteProjectIds : [],
       })
       toast.success(`Invitation sent to ${inviteEmail}`)
       setInviteEmail('')
+      setInviteName('')
       setInviteRole('member')
+      setInviteAccessLevel('organization')
+      setInviteProjectIds([])
       setShowInviteDialog(false)
     } catch (error) {
       toast.error(error.message || 'Failed to send invitation')
@@ -172,16 +196,25 @@ export default function OrganizationUsersPanel({
       toast.error('Please select a user')
       return
     }
+    
+    if (addUserAccessLevel === 'project' && addUserProjectIds.length === 0) {
+      toast.error('Please select at least one project')
+      return
+    }
 
     setIsSubmitting(true)
     try {
       await adminApi.addOrgMember(organizationId, {
         user_id: selectedUser.id,
         role: addUserRole,
+        accessLevel: addUserAccessLevel,
+        projectIds: addUserAccessLevel === 'project' ? addUserProjectIds : [],
       })
       toast.success(`${selectedUser.email} added to organization`)
       setSelectedUser(null)
       setAddUserRole('member')
+      setAddUserAccessLevel('organization')
+      setAddUserProjectIds([])
       setUserSearchQuery('')
       setShowInviteDialog(false)
       // Refetch members
@@ -319,6 +352,34 @@ export default function OrganizationUsersPanel({
                         </span>
                       </div>
 
+                      {/* Access Level Badge */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge 
+                              variant="outline" 
+                              className={cn(
+                                'text-xs',
+                                member.access_level === 'project' 
+                                  ? 'border-blue-500/30 text-blue-600 dark:text-blue-400 bg-blue-500/5' 
+                                  : 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5'
+                              )}
+                            >
+                              {member.access_level === 'project' ? (
+                                <><FolderOpen className="h-3 w-3 mr-1" /> Project</>
+                              ) : (
+                                <><Building2 className="h-3 w-3 mr-1" /> Org</>
+                              )}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {member.access_level === 'project' 
+                              ? 'Project-level access only — cannot see billing or org settings' 
+                              : 'Full organization access'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+
                       <Badge variant={STATUS_CONFIG[status]?.variant || 'secondary'}>
                         <StatusIcon className="h-3 w-3 mr-1" />
                         {STATUS_CONFIG[status]?.label || status}
@@ -386,15 +447,26 @@ export default function OrganizationUsersPanel({
             </TabsList>
 
             <TabsContent value="invite" className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="colleague@company.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="email">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="colleague@company.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="invite-name">Name <span className="text-[var(--text-tertiary)] font-normal">(optional)</span></Label>
+                  <Input
+                    id="invite-name"
+                    placeholder="John Doe"
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                  />
+                </div>
               </div>
               
               <div className="space-y-2">
@@ -425,6 +497,69 @@ export default function OrganizationUsersPanel({
                   </SelectContent>
                 </Select>
               </div>
+              
+              {/* Access Level */}
+              <div className="space-y-2">
+                <Label htmlFor="invite-access">Access Level</Label>
+                <Select value={inviteAccessLevel} onValueChange={(v) => { setInviteAccessLevel(v); if (v === 'organization') setInviteProjectIds([]); }}>
+                  <SelectTrigger id="invite-access">
+                    <SelectValue placeholder="Select access level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="organization">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="h-4 w-4 text-emerald-500" />
+                        Organization — Full access
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="project">
+                      <div className="flex items-center gap-2">
+                        <FolderOpen className="h-4 w-4 text-blue-500" />
+                        Project Only — Limited access
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-[var(--text-tertiary)]">
+                  {inviteAccessLevel === 'project' 
+                    ? 'User will only see assigned projects — no billing, proposals, or org settings' 
+                    : 'User will have access to all projects, billing, and org settings'}
+                </p>
+              </div>
+              
+              {/* Project Selector (shown when project-level) */}
+              {inviteAccessLevel === 'project' && availableProjects.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Assign to Projects</Label>
+                  <div className="border border-[var(--glass-border)] rounded-lg max-h-[160px] overflow-y-auto">
+                    {availableProjects.map((project) => (
+                      <label 
+                        key={project.id} 
+                        className="flex items-center gap-3 p-2.5 hover:bg-[var(--glass-bg-hover)] cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-[var(--input-border)] text-[var(--brand-primary)] focus:ring-[var(--brand-primary)]"
+                          checked={inviteProjectIds.includes(project.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setInviteProjectIds(prev => [...prev, project.id])
+                            } else {
+                              setInviteProjectIds(prev => prev.filter(id => id !== project.id))
+                            }
+                          }}
+                        />
+                        <span className="text-sm text-[var(--text-primary)]">{project.title || project.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {inviteProjectIds.length > 0 && (
+                    <p className="text-xs text-[var(--text-tertiary)]">
+                      {inviteProjectIds.length} project{inviteProjectIds.length !== 1 ? 's' : ''} selected
+                    </p>
+                  )}
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="existing" className="space-y-4 py-4">
@@ -486,6 +621,7 @@ export default function OrganizationUsersPanel({
               </div>
 
               {selectedUser && (
+                <>
                 <div className="space-y-2">
                   <Label htmlFor="add-role">Role</Label>
                   <Select value={addUserRole} onValueChange={setAddUserRole}>
@@ -514,6 +650,70 @@ export default function OrganizationUsersPanel({
                     </SelectContent>
                   </Select>
                 </div>
+                
+                {/* Access Level for existing user */}
+                <div className="space-y-2">
+                  <Label htmlFor="add-access">Access Level</Label>
+                  <Select value={addUserAccessLevel} onValueChange={(v) => { setAddUserAccessLevel(v); if (v === 'organization') setAddUserProjectIds([]); }}>
+                    <SelectTrigger id="add-access">
+                      <SelectValue placeholder="Select access level" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="organization">
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-emerald-500" />
+                          Organization — Full access
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="project">
+                        <div className="flex items-center gap-2">
+                          <FolderOpen className="h-4 w-4 text-blue-500" />
+                          Project Only — Limited access
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    {addUserAccessLevel === 'project' 
+                      ? 'User will only see assigned projects — no billing, proposals, or org settings' 
+                      : 'User will have access to all projects, billing, and org settings'}
+                  </p>
+                </div>
+                
+                {/* Project Selector for existing user */}
+                {addUserAccessLevel === 'project' && availableProjects.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Assign to Projects</Label>
+                    <div className="border border-[var(--glass-border)] rounded-lg max-h-[160px] overflow-y-auto">
+                      {availableProjects.map((project) => (
+                        <label 
+                          key={project.id} 
+                          className="flex items-center gap-3 p-2.5 hover:bg-[var(--glass-bg-hover)] cursor-pointer transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 rounded border-[var(--input-border)] text-[var(--brand-primary)] focus:ring-[var(--brand-primary)]"
+                            checked={addUserProjectIds.includes(project.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setAddUserProjectIds(prev => [...prev, project.id])
+                              } else {
+                                setAddUserProjectIds(prev => prev.filter(id => id !== project.id))
+                              }
+                            }}
+                          />
+                          <span className="text-sm text-[var(--text-primary)]">{project.title || project.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {addUserProjectIds.length > 0 && (
+                      <p className="text-xs text-[var(--text-tertiary)]">
+                        {addUserProjectIds.length} project{addUserProjectIds.length !== 1 ? 's' : ''} selected
+                      </p>
+                    )}
+                  </div>
+                )}
+                </>
               )}
             </TabsContent>
           </Tabs>
@@ -613,9 +813,24 @@ export default function OrganizationUsersPanel({
 
                   <div className="space-y-1">
                     <Label className="text-[var(--text-tertiary)] text-xs uppercase">Access Level</Label>
-                    <div className="text-[var(--text-primary)]">
-                      {selectedMember.access_level === 'organization' ? 'Organization-wide' : 'Project-specific'}
+                    <div className="flex items-center gap-2">
+                      {selectedMember.access_level === 'project' ? (
+                        <>
+                          <FolderOpen className="h-4 w-4 text-blue-500" />
+                          <span className="text-[var(--text-primary)]">Project Only</span>
+                        </>
+                      ) : (
+                        <>
+                          <Building2 className="h-4 w-4 text-emerald-500" />
+                          <span className="text-[var(--text-primary)]">Organization-wide</span>
+                        </>
+                      )}
                     </div>
+                    {selectedMember.access_level === 'project' && (
+                      <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                        Cannot access billing, proposals, or org settings
+                      </p>
+                    )}
                   </div>
 
                   {contact.last_sign_in_at && (

@@ -2170,7 +2170,7 @@ export default function EmailPlatform({
         initialHtml={editingTemplate?.html || ''}
         onSave={handleSaveTemplate}
         onBack={() => setShowTemplateEditor(false)}
-        showGallery={!editingTemplate}
+        showGallery={false}
         showImageLibrary={true}
         isNew={!editingTemplate}
         saveLabel={editingTemplate ? 'Save Template' : 'Create Template'}

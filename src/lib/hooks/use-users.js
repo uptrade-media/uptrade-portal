@@ -46,8 +46,14 @@ export function useInviteOrgMember() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: async ({ organizationId, email, role }) => {
-      const response = await adminApi.inviteOrgMember(organizationId, { email, role })
+    mutationFn: async ({ organizationId, email, name, role, accessLevel, projectIds }) => {
+      const response = await adminApi.addOrgMember(organizationId, { 
+        email, 
+        name: name || email.split('@')[0],
+        role,
+        accessLevel: accessLevel || 'organization',
+        projectIds: projectIds || [],
+      })
       return response.data || response
     },
     onSuccess: (_, { organizationId }) => {

@@ -91,11 +91,14 @@ export const getSEOPageData = cache(async (
   projectId: string,
   path: string
 ) => {
-  const result = await secureApiPost<{ page: any }>('/api/public/seo/page', { 
+  const result = await secureApiPost<{ page: any; project: any }>('/api/public/seo/page', { 
     projectId,
     path 
   })
-  return result?.page || null
+  return {
+    page: result?.page || null,
+    project: result?.project || null,
+  }
 })
 
 /**
